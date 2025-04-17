@@ -1,1 +1,0 @@
-sshfs longhai@bayes.usask.ca:/home/ ~/bayeshome -o allow_root -o volname=bayeshome -o reconnect
