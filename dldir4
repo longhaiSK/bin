@@ -1,0 +1,7 @@
+echo "I will update this directory from $1"
+if [ "$(pwd | grep ${wdir})" != "" ]
+then  
+    rsync -avL --delete --exclude=.* $1:~/work${PWD#${wdir}}/ .  $2 $3 $4
+else 
+    echo error: you are not in work directory
+fi

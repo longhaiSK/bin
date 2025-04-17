@@ -1,0 +1,1 @@
+sshfs statistics@math.usask.ca:/home/statistics ~/stat -o allow_root -o volname='statistics@math' -o reconnect

@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+
+import nbformat
+import re
+import argparse
+import sys
+import os
+
+def list_toc(notebook_path, add_numbering=True, max_depth=6):
+    """
+    Parses a Jupyter notebook file and prints its table of contents (headings).
+    """
+    # Check if the file exists before trying to read
+    if not os.path.exists(notebook_path):
+        print(f"Error: File not found: {notebook_path}", file=sys.stderr)
+        sys.exit(1) # Exit with a non-zero status to indicate error
+
+    try:
+        # Read the notebook using nbformat
+        notebook = nbformat.read(notebook_path, as_version=4)
+    except Exception as e:
+        print(f"Error reading notebook '{notebook_path}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+    headings_found = False
+    counters = [0] * 6 # Counters for H1-H6
+
+    # Iterate through cells in the notebook source
+    for cell in notebook.cells:
+        if cell.cell_type == 'markdown':
+            # Find headers: ^(#+) (whitespace) (text) using regex
+            found_headings = re.findall(r'^(#+)\s+(.*)', cell.source, re.MULTILINE)
+            for match in found_headings:
+                level = len(match[0]) # Number of '#' gives the heading level
+                text = match[1].strip() # The heading text
+
+                # Only process if heading has text and is within max_depth
+                if text and level <= max_depth:
+                    headings_found = True
+
+                    # --- Calculate Numbering (if enabled) ---
+                    if add_numbering:
+                        counters[level - 1] += 1 # Increment counter for current level
+                        # Reset counters for all deeper levels
+                        for i in range(level, len(counters)):
+                            counters[i] = 0
+                        # Create number string (e.g., "1.", "1.2.", "1.2.3.")
+                        number_string = "".join(str(counters[i]) + "." for i in range(level))
+                        display_text = number_string + " " + text
+                    else:
+                        display_text = text
+                    # --- End Numbering ---
+
+                    # --- Format Output for Terminal ---
+                    indent = "  " * (level - 1) # Use 2 spaces per indentation level
+                    print(f"{indent}- {display_text}")
+                    # --- End Formatting ---
+
+    # Optional: Print a message if no relevant headings were found
+    if not headings_found:
+        print(f"No Markdown headings (up to depth {max_depth}) found in '{os.path.basename(notebook_path)}'.")
+
+def main():
+    # --- Set up Command-Line Argument Parsing ---
+    parser = argparse.ArgumentParser(
+        description="List the Table of Contents (Markdown headings) of a Jupyter notebook file.",
+        formatter_class=argparse.RawDescriptionHelpFormatter # Preserve formatting in help message
+        )
+    parser.add_argument("notebook_file", # Positional argument for the filename
+                        help="Path to the .ipynb notebook file.")
+    parser.add_argument("-n", "--no-numbering", action="store_true",
+                        help="Disable automatic hierarchical numbering of headings.")
+    parser.add_argument("-d", "--depth", type=int, default=6,
+                        help="Maximum heading level (1-6) to include (default: 6).")
+
+    args = parser.parse_args() # Parse the arguments provided by the user
+
+    # Validate depth argument
+    if not 1 <= args.depth <= 6:
+        print("Error: Depth must be between 1 and 6.", file=sys.stderr)
+        sys.exit(1)
+
+    # Call the main function with parsed arguments
+    list_toc(
+        notebook_path=args.notebook_file,
+        add_numbering=(not args.no_numbering), # Enable numbering unless --no-numbering is set
+        max_depth=args.depth
+    )
+
+# Standard Python entry point
+if __name__ == "__main__":
+    main()
+    

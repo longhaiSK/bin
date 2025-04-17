@@ -1,0 +1,113 @@
+#!/bin/bash
+
+# --- Jupyter Notebook to Jupytext Python Script Converter ---
+#
+# Converts a Jupyter Notebook (.ipynb) to a Python script (.py)
+# using jupytext, ensuring Jupytext cell markers are included.
+# Preserves cell tags.
+# Post-processes the generated .py script to comment out lines
+# within cells tagged with "remove".
+#
+# Usage:
+#   ./notebook_to_py.sh <input_notebook.ipynb>
+#
+# Arguments:
+#   input_notebook.ipynb : Path to the input Jupyter Notebook.
+#
+# Output:
+#   Creates a Python script named <input_notebook_basename>.py
+#   in the same directory, with specified cells commented out.
+# -----------------------------------------------------------
+
+# Exit immediately if a command exits with a non-zero status.
+set -e
+
+# --- Argument Handling ---
+if [ "$#" -ne 1 ]; then
+    echo "Usage: $0 <input_notebook.ipynb>"
+    exit 1
+fi
+
+input_notebook=$1
+
+# --- Input Validation ---
+if [ ! -f "$input_notebook" ]; then
+  echo "Error: Input notebook '$input_notebook' not found."
+  exit 1
+fi
+if [[ "$input_notebook" != *.ipynb ]]; then
+  echo "Warning: Input file '$input_notebook' does not seem to be a Jupyter Notebook (.ipynb extension missing)."
+fi
+
+# --- Determine Output Filename ---
+base_name=$(basename "$input_notebook" .ipynb)
+# Temporary file for initial jupytext output - ensure it has .py suffix
+# Use --suffix if available (GNU mktemp), otherwise use template (macOS/BSD mktemp)
+if mktemp --suffix=.py --dry-run >/dev/null 2>&1; then
+    temp_output_script=$(mktemp --suffix=.py)
+else
+    temp_output_script=$(mktemp /tmp/jupytext_temp_XXXXXX.py)
+fi
+# Final output script name
+final_output_script="${base_name}.py"
+# Ensure temp file is removed on exit
+trap 'rm -f "$temp_output_script"' EXIT
+
+# --- Execute Jupytext Conversion ---
+echo "Converting '$input_notebook' to temporary script '$temp_output_script' using jupytext (percent format)..."
+
+# Convert using the 'py:percent' format explicitly.
+# Use filter to remove all standard metadata EXCEPT tags (-all,+tags).
+jupytext --to py:percent --opt cell_metadata_filter=-all,+tags "$input_notebook" -o "$temp_output_script"
+
+# Check exit status
+if [ $? -ne 0 ]; then
+  echo "Error: Jupytext conversion failed."
+  # temp file removed by trap
+  exit 1
+fi
+echo "Initial conversion successful. Temporary file '$temp_output_script' created."
+echo "This temporary script should contain '# %%' markers for cells, including tags if present."
+
+# --- Post-processing Step (Comment out "remove" blocks) ---
+echo "Post-processing temporary script to comment out 'remove' blocks..."
+echo "Saving final output to '$final_output_script'"
+
+# Use awk to process the temporary script
+# - Sets in_remove_block=1 when a line with 'tags=["remove"]' is found
+# - Sets in_remove_block=0 when any other '%%' marker is found
+# - If in_remove_block=1, prepends '# ' to the line
+# - Prints all lines (marker lines unchanged, others potentially commented)
+awk '
+BEGIN { in_remove_block = 0 }
+/^# %% tags=\[.*"remove".*\]/ { # Check if line contains the remove tag marker (adjust regex if needed for complex tags)
+    print $0;          # Print the marker line itself
+    in_remove_block = 1; # Set the flag
+    next;              # Skip to next line
+}
+/^# %%/ {              # Check for any other cell marker
+    print $0;          # Print the marker line itself
+    in_remove_block = 0; # Unset the flag
+    next;              # Skip to next line
+}
+{                      # For all other lines (content lines)
+    if (in_remove_block == 1) {
+        print "# " $0; # Add comment if inside a remove block
+    } else {
+        print $0;      # Otherwise print as is
+    }
+}' "$temp_output_script" > "$final_output_script" # Write processed output to FINAL file
+
+# Check awk exit status
+if [ $? -ne 0 ]; then
+  echo "Error: Post-processing step failed."
+  # temp file removed by trap, potentially remove final output if desired
+  # rm -f "$final_output_script"
+  exit 1
+fi
+
+echo "Post-processing successful. Final script saved to '$final_output_script'."
+
+# --- Script End ---
+# temp file is removed by trap
+exit 0

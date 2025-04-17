@@ -1,0 +1,10 @@
+
+for a in $(ls *.ps) 
+do 
+epstopdf $a 
+done
+
+for a in $(ls *.eps) 
+do 
+epstopdf  $a 
+done

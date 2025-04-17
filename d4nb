@@ -1,0 +1,3 @@
+rsync -av --delete --exclude=.* lhnb.homelinux.net:~/work/ $wdir/  $1 $2 $3 $4
+
+

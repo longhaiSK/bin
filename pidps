@@ -1,0 +1,1 @@
+ps -eo pid=,args= | grep "$1" | grep -v grep 

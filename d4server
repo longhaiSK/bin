@@ -1,0 +1,4 @@
+server=$1
+echo "Saving data to $server"
+rsync -av --delete --exclude=.*  $server:~/work/ $wdir/  $2 $3 $4
+

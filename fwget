@@ -1,0 +1,14 @@
+fileurl=$1
+server=$2
+
+if [ "$server" = "" ]
+then server=montecarlo.usask.ca
+fi
+
+ssh -T $server <<EOI
+cd ~/Desktop
+wget $fileurl
+scp `basename $fileurl` $localserver:~/Desktop
+rm `basename $fileurl`
+EOI
+

@@ -1,0 +1,12 @@
+#!/bin/bash
+
+if [ "$#" -ne 1 ]; then
+    echo "Usage: $0 <input_notebook>"
+    exit 1
+fi
+
+input_notebook=$1
+base_name=$(basename "$input_notebook" .ipynb)
+output_script="${base_name}.py"
+
+jupytext --to py --opt cell_metadata_filter=-all,remove "$input_notebook" -o "$output_script"

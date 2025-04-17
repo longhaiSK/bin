@@ -1,0 +1,7 @@
+echo "I will get file $1 from $2"
+if [ "$(pwd | grep ${wdir})" != "" ]
+then  
+    scp -r -p $2:~/work${PWD#${wdir}}/$1 .  
+else 
+    echo error: you are not in work directory
+fi

@@ -1,0 +1,24 @@
+
+#!/bin/bash
+
+server=longhai@math.usask.ca;
+
+localdir="/Users/lol553/OneDrive - University of Saskatchewan/teaching/stat812-2001/"
+destination=/home/longhai/public_html/teaching/2019/stat812/
+printf "We will sync \n$localdir \n to \n $server:$destination\n\n\n"
+rsync -avzi$1 --delete --exclude=".*" "$localdir"  $server:$destination
+
+localdir="/Users/lol553/OneDrive - University of Saskatchewan/teaching/stat345-2001/"
+destination=/home/longhai/public_html/teaching/2019/stat345/
+printf "We will sync \n$localdir \n to \n $server:$destination\n\n\n"
+rsync -avzi$1 --delete --exclude=".*" "$localdir"  $server:$destination
+
+#localdir="/Users/lol553/OneDrive - University of Saskatchewan/teaching/stat245_1909/"
+#destination=/home/longhai/public_html/teaching/2019/stat245
+#printf "We will sync btween \n$localdir \n and \n$server:$destination\n\n\n"
+#rsync -avzi$1 --delete --exclude=".*" $server:$destination "$localdir"  
+
+localdir="/Users/lol553/OneDrive - University of Saskatchewan/teaching/stat245_1909/"
+destination=/home/longhai/public_html/teaching/2019/stat245/
+printf "We will sync btween \n$localdir \n and \n$server:$destination\n\n\n"
+rsync -avzi$1 --delete --exclude=".*" "$localdir" $server:$destination  

@@ -1,0 +1,13 @@
+$1
+
+ssh -T montecarlo.usask.ca <<EOI
+echo "I have sucessfully logged in montecarlo.usask.ca"
+if [ "$(pwd | grep ${wdir})" != "" ]
+then
+    cd ~/work/${PWD#$wdir}
+    $1
+else
+    echo error: you are not in work directory
+fi
+
+

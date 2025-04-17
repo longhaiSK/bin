@@ -1,0 +1,6 @@
+rm *.aux
+rm *.log
+rm *.synctex.gz*
+rm *.out
+rm *.blg
+rm *.bak

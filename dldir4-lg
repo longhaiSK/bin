@@ -1,0 +1,10 @@
+echo "I am going to update this directory from $1"
+ssh -T $1 <<EOI
+echo "I have sucessfully logged in $1"
+if [ "$(pwd | grep ${wdir})" != "" ]
+then
+    cd ~/work${PWD#$wdir}
+    bkdir2 $localserver   $2 $3 $4
+else
+    echo error: you are not in work directory
+fi

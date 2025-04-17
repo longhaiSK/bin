@@ -1,0 +1,2 @@
+nohup runR $1 - 
+echo "Your R job $1 is finished" | mail longhai.li@gmail.com 

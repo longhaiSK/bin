@@ -1,0 +1,4 @@
+echo "Saving data to montecarlo.usask.ca"
+rsync -av --delete --exclude=.* ~/work/ montecarlo.usask.ca:~/work/   $1 $2 $3 $4
+
+
