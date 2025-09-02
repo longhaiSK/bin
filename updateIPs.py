@@ -26,22 +26,50 @@ def get_computer_name():
         name = subprocess.check_output(["scutil", "--get", "ComputerName"], text=True).strip()
         return name
     except (subprocess.CalledProcessError, FileNotFoundError):
-        # Fallback to the original method if scutil fails for any reason
         return socket.gethostname().replace('.local', '')
 
 def get_public_ip():
     """Gets the public IP address from an external service."""
     try:
-        # Use a reliable service to get the public IP
         ip = requests.get('https://api.ipify.org', timeout=5).text.strip()
         return ip
     except requests.RequestException:
         return "Could not fetch public IP"
 
+def get_local_ip():
+    """
+    Gets the local IP address using macOS-specific commands for reliability.
+    This is more robust than the previous socket-based method.
+    """
+    try:
+        # First, try the primary Wi-Fi interface (en0 is common for modern Macs)
+        ip = subprocess.check_output(["ipconfig", "getifaddr", "en0"], text=True, stderr=subprocess.DEVNULL).strip()
+        if ip: return ip
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass # Interface might not be active, so we continue
+
+    try:
+        # If Wi-Fi fails, try the primary Ethernet interface (en1 is a common fallback)
+        ip = subprocess.check_output(["ipconfig", "getifaddr", "en1"], text=True, stderr=subprocess.DEVNULL).strip()
+        if ip: return ip
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass # This interface might also not be active
+
+    # If ipconfig fails, fall back to the old socket method as a last resort
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.settimeout(1.0)
+    try:
+        s.connect(('8.8.8.8', 1))
+        IP = s.getsockname()[0]
+    except Exception:
+        IP = '127.0.0.1' # Final fallback
+    finally:
+        s.close()
+    return IP
+
 def get_apple_note_content(note_title):
     """Gets the body of a specific Apple Note using AppleScript."""
     safe_title = escape_for_applescript(note_title)
-    # This revised script is more direct in finding the note.
     script = f'''
     tell application "Notes"
         tell account "iCloud"
@@ -59,18 +87,23 @@ def get_apple_note_content(note_title):
     end tell
     '''
     try:
-        # Execute the script and capture the output
         result = subprocess.run(["osascript", "-e", script], check=True, capture_output=True, text=True)
         return result.stdout.strip()
     except subprocess.CalledProcessError as e:
-        print(f"Error reading note: {e.stderr}")
-        return "" # Return empty string on error
+        error_message = e.stderr.decode()
+        print(f"Error reading note: {error_message}")
+        if "Not authorized" in error_message or "access" in error_message:
+            print("\n--- PERMISSION ERROR DETECTED ---")
+            print("macOS is likely blocking this script from controlling the Notes app.")
+            print("Please go to System Settings > Privacy & Security > Automation.")
+            print("Find the application you are running this script from (e.g., Terminal) and ensure 'Notes' is checked ON.")
+            print("---------------------------------")
+        return ""
 
 def update_apple_note(note_title, note_body):
     """Updates the body of a specific Apple Note using AppleScript."""
     safe_title = escape_for_applescript(note_title)
     safe_body = escape_for_applescript(note_body)
-    # This revised script will create the folder if it does not exist.
     script = f'''
     tell application "Notes"
         tell account "iCloud"
@@ -92,40 +125,43 @@ def update_apple_note(note_title, note_body):
         subprocess.run(["osascript", "-e", script], check=True, capture_output=True)
         print(f"Successfully updated note: '{safe_title}'")
     except subprocess.CalledProcessError as e:
-        print(f"Error updating note: {e.stderr.decode()}")
+        error_message = e.stderr.decode()
+        print(f"Error updating note: {error_message}")
+        if "Not authorized" in error_message or "access" in error_message:
+            print("\n--- PERMISSION ERROR DETECTED ---")
+            print("macOS is likely blocking this script from controlling the Notes app.")
+            print("Please go to System Settings > Privacy & Security > Automation.")
+            print("Find the application you are running this script from (e.g., Terminal) and ensure 'Notes' is checked ON.")
+            print("---------------------------------")
 
 if __name__ == "__main__":
-    # Get the computer's name using the more reliable scutil method
     computer_name = get_computer_name()
-    
-    # Fetch the public IP address
     public_ip = get_public_ip()
-    
-    # Get current date and time
+    local_ip = get_local_ip() # Get the local IP
     current_date = datetime.now().strftime("%Y-%m-%d %I:%M %p")
+
+    # Print the fetched information to the terminal for debugging
+    print("--- Running IP Update Script ---")
+    print(f"Computer Name: {computer_name}")
+    print(f"Public IP: {public_ip}")
+    print(f"Local IP: {local_ip}")
+    print("------------------------------")
     
-    # Format the new line for the current computer
-    new_line_for_this_mac = f"{computer_name}: {public_ip}, {current_date}"
+    # Updated format to include the local IP address
+    new_line_for_this_mac = f"{computer_name}: {public_ip} (Local: {local_ip}), {current_date}"
     
-    # Read the existing content from the note
     existing_content = get_apple_note_content(NOTE_TITLE)
     existing_lines = existing_content.splitlines()
     
-    # Create a new list of lines, excluding any old entries for this computer (case-insensitive)
     search_prefix = (computer_name + ":").lower()
     updated_lines = []
     for line in existing_lines:
-        # Strip HTML tags and whitespace, then convert to lower case for comparison
         clean_line = strip_html(line).strip().lower()
         if not clean_line.startswith(search_prefix):
             updated_lines.append(line)
 
-    # Add the new, updated line to the list
     updated_lines.append(new_line_for_this_mac)
-    
-    # Join the lines back together into a single string for the note body
     new_note_content = "\n".join(updated_lines)
     
-    # Update the note with the new content
     update_apple_note(NOTE_TITLE, new_note_content)
 
