@@ -1,97 +1,85 @@
 #!/bin/bash
 
-# A script to check for pending git changes and then sync them.
+# --- Customize these variables for your project ---
+REPO_PATH="~/Github/longhaiSK.github.io"
+BRANCH_NAME="main"
+# ---------------------------------------------
 
-# --- Style Definitions ---
-COLOR_GREEN='\033[0;32m'
-COLOR_YELLOW='\033[0;33m'
-COLOR_BLUE='\033[0;34m'
-COLOR_BOLD='\033[1m'
-COLOR_RESET='\033[0m'
+# --- Color Definitions for visual feedback ---
+C_BLUE='\033[0;34m'
+C_GREEN='\033[0;32m'
+C_YELLOW='\033[0;33m'
+C_NONE='\033[0m' # No Color
+# -------------------------------------------
 
-# --- Main Logic ---
+# Navigate to the repository directory.
+cd "$(eval echo "$REPO_PATH")" || { echo "ERROR: Repository path not found at $REPO_PATH"; exit 1; }
 
-# 1. Ensure we are in a git repository
-if ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
-    echo -e "${COLOR_YELLOW}ERROR: This is not a Git repository.${COLOR_RESET}"
-    exit 1
+echo -e "${C_BLUE}--- Starting GitHub Sync: $(TZ='America/Chicago' date) ---${C_NONE}"
+
+# Store the current commit hash to compare against after pulling.
+OLD_HEAD=$(git rev-parse HEAD)
+
+# Step 1: Pull remote changes.
+echo -e "\n${C_BLUE}1. Pulling remote changes...${C_NONE}"
+git pull --rebase --autostash origin "$BRANCH_NAME" || { echo "ERROR: Pull failed. Please resolve conflicts manually."; exit 1; }
+
+# --- SHOW PULLED CHANGES ---
+# Compare the commit hash before and after the pull.
+NEW_HEAD=$(git rev-parse HEAD)
+if [ "$OLD_HEAD" != "$NEW_HEAD" ]; then
+    echo -e "${C_GREEN}   ↓ Changes pulled from remote:${C_NONE}"
+    # Use git log to show a formatted list of the new commits that were pulled.
+    git log --pretty=format:"     %C(yellow)%h%C(reset) - %s %C(cyan)(%an, %ar)%C(reset)" "$OLD_HEAD".."$NEW_HEAD"
+else
+    echo -e "${C_GREEN}   ✓ Your local branch is up-to-date.${C_NONE}"
+fi
+# ---------------------------
+
+# Step 2: Stage all new and modified files.
+echo -e "\n${C_BLUE}2. Staging all local changes...${C_NONE}"
+git add .
+
+# --- SHOW STAGED CHANGES ---
+# Use `git diff` to provide a summary of files staged for commit.
+if ! git diff --staged --quiet; then
+    echo -e "${C_GREEN}   Changes staged for commit:${C_NONE}"
+    # The --stat flag provides a concise summary. `sed` is used to indent the output.
+    git diff --staged --stat | sed 's/^/    /'
+else
+    echo -e "${C_GREEN}   ✓ No local changes to stage.${C_NONE}"
+fi
+# ---------------------------
+
+# Step 3: Commit the changes.
+if [ -n "$1" ]; then
+  COMMIT_MSG="$1"
+else
+  COMMIT_MSG="Automated commit on $(TZ='America/Chicago' date)"
 fi
 
-echo -e "${COLOR_BLUE}📡 Fetching the latest remote data...${COLOR_RESET}"
-git fetch
-
-# 2. Get the current branch and its remote tracking branch
-LOCAL_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-UPSTREAM_BRANCH=$(git rev-parse --abbrev-ref "@{u}" 2>/dev/null)
-
-if [ -z "$UPSTREAM_BRANCH" ]; then
-    echo -e "${COLOR_YELLOW}WARNING: No remote tracking branch is set for '${LOCAL_BRANCH}'.${COLOR_RESET}"
-    echo -e "You can set it with: ${COLOR_BOLD}git branch --set-upstream-to=origin/${LOCAL_BRANCH}${COLOR_RESET}"
-    exit 1
+# Only attempt to commit if there are actually staged changes.
+if ! git diff --staged --quiet; then
+    echo -e "\n${C_BLUE}3. Committing with message: \"$COMMIT_MSG\"${C_NONE}"
+    git commit -m "$COMMIT_MSG"
+else
+    echo -e "\n${C_BLUE}3. Nothing to commit.${C_NONE}"
 fi
 
-echo -e "Local branch: ${COLOR_BOLD}${LOCAL_BRANCH}${COLOR_RESET} | Remote branch: ${COLOR_BOLD}${UPSTREAM_BRANCH}${COLOR_RESET}\n"
+# Step 4: Push your commits to the remote repository.
+echo -e "\n${C_BLUE}4. Pushing local commits to origin/$BRANCH_NAME...${C_NONE}"
 
-# 3. Show changes to be pulled and pushed
-COMMITS_TO_PULL=$(git log --pretty=format:"- %s (%cr)" HEAD.."$UPSTREAM_BRANCH")
-COMMITS_TO_PUSH=$(git log --pretty=format:"- %s (%cr)" "$UPSTREAM_BRANCH"..HEAD)
-UNCOMMITTED_CHANGES=$(git status --porcelain)
-
-if [ -z "$COMMITS_TO_PULL" ] && [ -z "$COMMITS_TO_PUSH" ] && [ -z "$UNCOMMITTED_CHANGES" ]; then
-    echo -e "${COLOR_GREEN}✅ Everything is up-to-date. Nothing to do.${COLOR_RESET}"
-    exit 0
-fi
-
-if [ -n "$COMMITS_TO_PULL" ]; then
-    echo -e "${COLOR_YELLOW}🔽 Changes to be PULLED:${COLOR_RESET}"
-    echo "$COMMITS_TO_PULL"
-    echo
-fi
+# --- SHOW PUSHED CHANGES ---
+# Check for local commits that don't exist on the remote branch yet.
+COMMITS_TO_PUSH=$(git log --pretty=format:"     %C(yellow)%h%C(reset) - %s %C(cyan)(%an, %ar)%C(reset)" origin/"$BRANCH_NAME"..HEAD)
 
 if [ -n "$COMMITS_TO_PUSH" ]; then
-    echo -e "${COLOR_YELLOW}🔼 Changes to be PUSHED:${COLOR_RESET}"
-    echo "$COMMITS_TO_PUSH"
-    echo
-fi
-
-if [ -n "$UNCOMMITTED_CHANGES" ]; then
-    echo -e "${COLOR_YELLOW}📝 Uncommitted local file changes found:${COLOR_RESET}"
-    git status -s
-    echo
-fi
-
-# 4. Ask for confirmation to proceed
-read -p "Do you want to proceed with syncing? (y/n) " -n 1 -r
-echo
-
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    echo -e "\n--- Starting Sync ---"
-
-    # Pull remote changes first
-    echo "1. Pulling remote changes..."
-    git pull --rebase --autostash || { echo "ERROR: Pull failed."; exit 1; }
-
-    # Stage and commit ONLY if there are uncommitted file changes
-    if [ -n "$(git status --porcelain)" ]; then
-        echo "2. Staging all local changes..."
-        git add .
-
-        if [ -n "$1" ]; then
-            COMMIT_MSG="$1"
-        else
-            COMMIT_MSG="Automated commit on $(TZ='America/Chicago' date)"
-        fi
-        echo "3. Committing with message: \"$COMMIT_MSG\""
-        git commit -m "$COMMIT_MSG"
-    else
-        echo "--> No new file changes to commit."
-    fi
-
-    # Push all commits (both old and new)
-    echo "4. Pushing all changes to remote..."
-    git push || { echo "ERROR: Push failed."; exit 1; }
-
-    echo -e "\n${COLOR_GREEN}✅ Sync complete!${COLOR_RESET}"
+    echo -e "${C_GREEN}   ↑ Commits to be pushed:${C_NONE}"
+    echo -e "$COMMITS_TO_PUSH"
+    git push origin "$BRANCH_NAME"
 else
-    echo "Sync cancelled by user."
+    echo -e "${C_GREEN}   ✓ Repository is already in sync. Nothing to push.${C_NONE}"
 fi
+# -------------------------
+
+echo -e "\n${C_BLUE}--- Sync complete ---${C_NONE}"
