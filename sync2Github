@@ -10,6 +10,7 @@ C_BLUE='\033[0;34m'
 C_GREEN='\033[0;32m'
 C_YELLOW='\033[0;33m'
 C_NONE='\033[0m' # No Color
+
 # -------------------------------------------
 
 # Navigate to the repository directory.

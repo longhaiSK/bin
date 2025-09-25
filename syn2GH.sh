@@ -1,0 +1,187 @@
+#!/usr/bin/env bash
+
+# ===============================================
+# Sync ALL git repos under the specified roots
+# Usage:
+#   bash syn2GH.sh "Your commit message here"
+# ===============================================
+
+# ---- Customize these search roots ----
+ROOTS=(
+  "$HOME/Github"
+)
+# Exclude heavy/noisy directories (regex for grep -vE)
+EXCLUDE_REGEX='(/\.venv/|/node_modules/|/\.cargo/)'
+# -------------------------------------
+
+# ---- Colors ----
+C_BLUE='\033[0;34m'
+C_GREEN='\033[0;32m'
+C_YELLOW='\033[0;33m'
+C_RED='\033[0;31m'
+C_NONE='\033[0m'
+# ----------------
+
+# ---- Commit message ----
+if [ -n "$1" ]; then
+  COMMIT_MSG="$1"
+else
+  COMMIT_MSG="Automated commit on $(TZ='America/Regina' date)"
+fi
+
+sep() { echo -e "${C_BLUE}----------------------------------------------------------------------${C_NONE}"; }
+
+errors=()
+
+process_repo() {
+  local repo_dir="$1"
+  echo
+  sep
+  echo -e "${C_BLUE}Repo: ${C_YELLOW}${repo_dir}${C_NONE}"
+  echo -e "${C_BLUE}Time: $(TZ='America/Regina' date)${C_NONE}"
+
+  cd "$repo_dir" || { echo -e "${C_RED}  ! Cannot enter directory${C_NONE}"; errors+=("$repo_dir: cd failed"); return; }
+
+  # Ensure it's a git repo
+  if ! git rev-parse --git-dir >/dev/null 2>&1; then
+    echo -e "${C_YELLOW}  ! Not a git repo (skipping)${C_NONE}"
+    return
+  fi
+
+  # Current branch (skip detached HEAD)
+  BRANCH_NAME=$(git symbolic-ref --quiet --short HEAD 2>/dev/null)
+  if [ -z "$BRANCH_NAME" ]; then
+    echo -e "${C_YELLOW}  ! Detached HEAD (skipping)${C_NONE}"
+    return
+  fi
+  echo -e "  Current branch: ${C_GREEN}${BRANCH_NAME}${C_NONE}"
+
+  # Ensure 'origin' remote exists
+  if ! git remote get-url origin >/dev/null 2>&1; then
+    echo -e "${C_YELLOW}  ! No 'origin' remote (skipping)${C_NONE}"
+    return
+  fi
+
+  # Upstream tracking
+  TRACKING_REF=$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null)
+  if [ -z "$TRACKING_REF" ]; then
+    DEFAULT_REMOTE_BRANCH=$(git remote show origin 2>/dev/null | awk '/HEAD branch/ {print $NF}')
+    if [ -n "$DEFAULT_REMOTE_BRANCH" ]; then
+      echo -e "  Setting upstream to origin/${DEFAULT_REMOTE_BRANCH}"
+      if ! git branch --set-upstream-to="origin/${DEFAULT_REMOTE_BRANCH}" "$BRANCH_NAME" >/dev/null 2>&1; then
+        echo -e "${C_YELLOW}  ! Could not set upstream (continuing without pull)${C_NONE}"
+      fi
+      TRACKING_REF="origin/${DEFAULT_REMOTE_BRANCH}"
+    else
+      echo -e "${C_YELLOW}  ! No upstream and cannot detect origin default (skipping pull)${C_NONE}"
+    fi
+  fi
+
+  # Pull
+  OLD_HEAD=$(git rev-parse HEAD 2>/dev/null)
+  echo -e "\n${C_BLUE}1) Pulling remote changes...${C_NONE}"
+  git fetch origin >/dev/null 2>&1 || true
+  if [ -n "$TRACKING_REF" ]; then
+    if ! git pull --rebase --autostash origin "$BRANCH_NAME"; then
+      echo -e "${C_RED}  ! Pull failed. Resolve conflicts and re-run.${C_NONE}"
+      errors+=("$repo_dir: pull failed")
+      return
+    fi
+  else
+    echo -e "${C_YELLOW}  ! No tracking branch; skipping pull${C_NONE}"
+  fi
+
+  NEW_HEAD=$(git rev-parse HEAD 2>/dev/null)
+  if [ "$OLD_HEAD" != "$NEW_HEAD" ]; then
+    echo -e "${C_GREEN}   ↓ Changes pulled:${C_NONE}"
+    git log --pretty=format:"     %C(yellow)%h%C(reset) - %s %C(cyan)(%an, %ar)%C(reset)" "$OLD_HEAD".."$NEW_HEAD"
+  else
+    echo -e "${C_GREEN}   ✓ Up-to-date with remote.${C_NONE}"
+  fi
+
+  # Stage
+  echo -e "\n${C_BLUE}2) Staging changes...${C_NONE}"
+  git add -A
+  if ! git diff --staged --quiet; then
+    echo -e "${C_GREEN}   Staged diff:${C_NONE}"
+    git diff --staged --stat | sed 's/^/    /'
+  else
+    echo -e "${C_GREEN}   ✓ Nothing to stage.${C_NONE}"
+  fi
+
+  # Commit
+  echo -e "\n${C_BLUE}3) Commit...${C_NONE}"
+  if ! git diff --staged --quiet; then
+    if ! git commit -m "$COMMIT_MSG"; then
+      echo -e "${C_RED}  ! Commit failed${C_NONE}"
+      errors+=("$repo_dir: commit failed")
+      return
+    fi
+  else
+    echo -e "${C_GREEN}   ✓ Nothing to commit.${C_NONE}"
+  fi
+
+  # Push
+  echo -e "\n${C_BLUE}4) Push...${C_NONE}"
+  # What would be pushed
+  if [ -n "$TRACKING_REF" ]; then
+    TO_PUSH=$(git log --pretty=format:"     %C(yellow)%h%C(reset) - %s %C(cyan)(%an, %ar)%C(reset)" "${TRACKING_REF}"..HEAD 2>/dev/null)
+  else
+    TO_PUSH=$(git log --pretty=format:"     %C(yellow)%h%C(reset) - %s %C(cyan)(%an, %ar)%C(reset)" "origin/$BRANCH_NAME"..HEAD 2>/dev/null)
+  fi
+
+  if [ -n "$TO_PUSH" ]; then
+    echo -e "${C_GREEN}   ↑ Commits to push:${C_NONE}"
+    echo -e "$TO_PUSH"
+    if ! git push origin "$BRANCH_NAME"; then
+      echo -e "${C_RED}  ! Push failed${C_NONE}"
+      errors+=("$repo_dir: push failed")
+      return
+    fi
+  else
+    echo -e "${C_GREEN}   ✓ Already in sync.${C_NONE}"
+  fi
+}
+
+echo -e "${C_BLUE}=== GitHub Sync: $(TZ='America/Regina' date) ===${C_NONE}"
+
+# ---- Build repo list without 'mapfile' ----
+all_git_dirs=()
+for root in "${ROOTS[@]}"; do
+  [ -d "$root" ] || continue
+  # List .git dirs, strip '/.git', filter excludes, collect unique
+  # (Uniq: we sort then skip duplicates manually for Bash 3.2 portability)
+  tmp_file="$(mktemp)"
+  find "$root" -type d -name .git -prune -print 2>/dev/null | sed 's/\/\.git$//' | grep -vE "${EXCLUDE_REGEX}" | sort > "$tmp_file"
+  last_line=""
+  while IFS= read -r line; do
+    if [ "$line" != "$last_line" ]; then
+      all_git_dirs+=( "$line" )
+      last_line="$line"
+    fi
+  done < "$tmp_file"
+  rm -f "$tmp_file"
+done
+
+if [ ${#all_git_dirs[@]} -eq 0 ]; then
+  echo -e "${C_YELLOW}No git repositories found under configured ROOTS.${C_NONE}"
+  exit 0
+fi
+
+echo -e "${C_BLUE}Found ${#all_git_dirs[@]} repositories.${C_NONE}"
+
+# ---- Process each repo ----
+for repo in "${all_git_dirs[@]}"; do
+  process_repo "$repo"
+done
+
+sep
+if [ ${#errors[@]} -gt 0 ]; then
+  echo -e "${C_RED}Completed with ${#errors[@]} issue(s):${C_NONE}"
+  for e in "${errors[@]}"; do
+    echo " - $e"
+  done
+  exit 1
+else
+  echo -e "${C_GREEN}All repositories synced successfully!${C_NONE}"
+fi
