@@ -1,0 +1,97 @@
+#!/bin/bash
+
+# A script to check for pending git changes and then sync them.
+
+# --- Style Definitions ---
+COLOR_GREEN='\033[0;32m'
+COLOR_YELLOW='\033[0;33m'
+COLOR_BLUE='\033[0;34m'
+COLOR_BOLD='\033[1m'
+COLOR_RESET='\033[0m'
+
+# --- Main Logic ---
+
+# 1. Ensure we are in a git repository
+if ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+    echo -e "${COLOR_YELLOW}ERROR: This is not a Git repository.${COLOR_RESET}"
+    exit 1
+fi
+
+echo -e "${COLOR_BLUE}📡 Fetching the latest remote data...${COLOR_RESET}"
+git fetch
+
+# 2. Get the current branch and its remote tracking branch
+LOCAL_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+UPSTREAM_BRANCH=$(git rev-parse --abbrev-ref "@{u}" 2>/dev/null)
+
+if [ -z "$UPSTREAM_BRANCH" ]; then
+    echo -e "${COLOR_YELLOW}WARNING: No remote tracking branch is set for '${LOCAL_BRANCH}'.${COLOR_RESET}"
+    echo -e "You can set it with: ${COLOR_BOLD}git branch --set-upstream-to=origin/${LOCAL_BRANCH}${COLOR_RESET}"
+    exit 1
+fi
+
+echo -e "Local branch: ${COLOR_BOLD}${LOCAL_BRANCH}${COLOR_RESET} | Remote branch: ${COLOR_BOLD}${UPSTREAM_BRANCH}${COLOR_RESET}\n"
+
+# 3. Show changes to be pulled and pushed
+COMMITS_TO_PULL=$(git log --pretty=format:"- %s (%cr)" HEAD.."$UPSTREAM_BRANCH")
+COMMITS_TO_PUSH=$(git log --pretty=format:"- %s (%cr)" "$UPSTREAM_BRANCH"..HEAD)
+UNCOMMITTED_CHANGES=$(git status --porcelain)
+
+if [ -z "$COMMITS_TO_PULL" ] && [ -z "$COMMITS_TO_PUSH" ] && [ -z "$UNCOMMITTED_CHANGES" ]; then
+    echo -e "${COLOR_GREEN}✅ Everything is up-to-date. Nothing to do.${COLOR_RESET}"
+    exit 0
+fi
+
+if [ -n "$COMMITS_TO_PULL" ]; then
+    echo -e "${COLOR_YELLOW}🔽 Changes to be PULLED:${COLOR_RESET}"
+    echo "$COMMITS_TO_PULL"
+    echo
+fi
+
+if [ -n "$COMMITS_TO_PUSH" ]; then
+    echo -e "${COLOR_YELLOW}🔼 Changes to be PUSHED:${COLOR_RESET}"
+    echo "$COMMITS_TO_PUSH"
+    echo
+fi
+
+if [ -n "$UNCOMMITTED_CHANGES" ]; then
+    echo -e "${COLOR_YELLOW}📝 Uncommitted local file changes found:${COLOR_RESET}"
+    git status -s
+    echo
+fi
+
+# 4. Ask for confirmation to proceed
+read -p "Do you want to proceed with syncing? (y/n) " -n 1 -r
+echo
+
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    echo -e "\n--- Starting Sync ---"
+
+    # Pull remote changes first
+    echo "1. Pulling remote changes..."
+    git pull --rebase --autostash || { echo "ERROR: Pull failed."; exit 1; }
+
+    # Stage and commit ONLY if there are uncommitted file changes
+    if [ -n "$(git status --porcelain)" ]; then
+        echo "2. Staging all local changes..."
+        git add .
+
+        if [ -n "$1" ]; then
+            COMMIT_MSG="$1"
+        else
+            COMMIT_MSG="Automated commit on $(TZ='America/Chicago' date)"
+        fi
+        echo "3. Committing with message: \"$COMMIT_MSG\""
+        git commit -m "$COMMIT_MSG"
+    else
+        echo "--> No new file changes to commit."
+    fi
+
+    # Push all commits (both old and new)
+    echo "4. Pushing all changes to remote..."
+    git push || { echo "ERROR: Push failed."; exit 1; }
+
+    echo -e "\n${COLOR_GREEN}✅ Sync complete!${COLOR_RESET}"
+else
+    echo "Sync cancelled by user."
+fi

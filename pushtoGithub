@@ -1,0 +1,45 @@
+#!/bin/bash
+
+# --- Customize these variables for your project ---
+REPO_PATH="~/Github/longhaiSK.github.io"
+BRANCH_NAME="main"
+# ---------------------------------------------
+
+# Navigate to the repository directory. Exit with an error if it fails.
+# The `eval` command correctly handles the '~' character for the home directory.
+cd "$(eval echo "$REPO_PATH")" || { echo "ERROR: Repository path not found at $REPO_PATH"; exit 1; }
+
+echo "--- Starting GitHub Sync: $(TZ='America/Chicago' date) ---"
+
+# Step 1: Pull remote changes to sync local repository.
+# --rebase avoids messy merge commits for a cleaner history.
+# --autostash temporarily saves any uncommitted changes and reapplies them after the pull.
+echo "1. Pulling remote changes..."
+git pull --rebase --autostash origin "$BRANCH_NAME" || { echo "ERROR: Pull failed. Please resolve conflicts manually and try again.
+"; exit 1; }
+
+# Step 2: Stage all new and modified files.
+echo "2. Staging all local changes..."
+git add .
+
+# Step 3: Commit the changes.
+# Check if a commit message was passed as the first argument ($1) to the script.
+if [ -n "$1" ]; then
+  # Use the provided message.
+  COMMIT_MSG="$1"
+else
+  # If no message is provided, create a default one.
+  # TZ sets the timezone to CST for the date command.
+  COMMIT_MSG="Automated commit on $(TZ='America/Chicago' date)"
+fi
+
+echo "3. Committing with message: \"$COMMIT_MSG\""
+# The `git commit` command will fail cleanly if there's nothing to commit.
+# The `|| true` part ensures the script doesn't exit with an error in that case.
+git commit -m "$COMMIT_MSG" || true
+
+# Step 4: Push your commits to the remote repository.
+echo "4. Pushing local commits to origin/$BRANCH_NAME..."
+git push origin "$BRANCH_NAME"
+
+echo "--- Sync complete ---"
