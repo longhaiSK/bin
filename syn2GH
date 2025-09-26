@@ -100,13 +100,22 @@ process_repo() {
 
   # 3) Commit
   if ! git diff --staged --quiet; then
-    echo -e "${C_BLUE}3) Commit:${C_NONE}"
-    if ! git commit -m "$COMMIT_MSG"; then
-      echo -e "${C_RED}  ! Commit failed${C_NONE}"
+    # Attempt the commit and capture all output
+    COMMIT_OUTPUT=$(git commit -m "$COMMIT_MSG" 2>&1)
+    
+    # Check the exit code of the commit command
+    if [ $? -ne 0 ]; then
+      # Commit FAILED: Print the error output from git
+      echo -e "${C_BLUE}3) Commit:${C_RED} ! Commit FAILED. Details:${C_NONE}"
+      echo -e "$COMMIT_OUTPUT"
       errors+=("$repo_dir: commit failed")
       return
+    else
+      # Commit SUCCEEDED: Print a simple confirmation message
+      echo -e "${C_BLUE}3) Commit:${C_GREEN} ✓ Committed successfully.${C_NONE}"
     fi
   else
+    # No changes to commit, this remains the same
     echo -e "${C_BLUE}3) Commit:${C_GREEN} ✓ Nothing to commit.${C_NONE}"
   fi
 
