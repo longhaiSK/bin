@@ -150,7 +150,6 @@ process_repo() {
   fi
 }
 
-echo -e "${C_BLUE}=== GitHub Sync: $(TZ='America/Regina' date) ===${C_NONE}"
 
 # ---- Build repo list without 'mapfile' ----
 all_git_dirs=()
@@ -175,7 +174,6 @@ if [ ${#all_git_dirs[@]} -eq 0 ]; then
   exit 0
 fi
 
-echo -e "${C_BLUE}Found ${#all_git_dirs[@]} repositories.${C_NONE}"
 
 # ---- Process each repo ----
 for repo in "${all_git_dirs[@]}"; do
