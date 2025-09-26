@@ -1,3 +1,0 @@
-scp ~/covid/covid-canada.html longhai@math.usask.ca:~/public_html/covid-canada.html
-scp ~/covid/covid-sk.html longhai@math.usask.ca:~/public_html/covid-sk.html
-scp ~/covid/covid-usa.html longhai@math.usask.ca:~/public_html/covid-usa.html

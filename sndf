@@ -1,8 +1,0 @@
-echo "I am going to send file $1 to $2"
-if [ "$(pwd | grep ${wdir})" != "" ]
-then  
-    scp -r -p $1 $2:~/work${PWD#${wdir}}/  
-else 
-    echo error: you are not in work directory
-fi
-

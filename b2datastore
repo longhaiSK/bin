@@ -1,2 +1,0 @@
-mkdir /datastore/$user
-rsync -avzi$1 --delete --exclude=".*" .  /datastore/$user

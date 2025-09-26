@@ -1,5 +1,0 @@
-dsource=$1
-
-rm $dsource.pdf
-
-R CMD Rd2pdf --no-preview $dsource

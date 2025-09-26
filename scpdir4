@@ -1,7 +1,0 @@
-echo "I will update this directory from $1"
-if [ "$(pwd | grep ${wdir})" != "" ]
-then  
-    scp  $1:~/work${PWD#${wdir}}/* .  
-else 
-    echo error: you are not in work directory
-fi
