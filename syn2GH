@@ -181,14 +181,3 @@ echo -e "${C_BLUE}Found ${#all_git_dirs[@]} repositories.${C_NONE}"
 for repo in "${all_git_dirs[@]}"; do
   process_repo "$repo"
 done
-
-echo # Adds a space before the final summary
-if [ ${#errors[@]} -gt 0 ]; then
-  echo -e "${C_RED}Completed with ${#errors[@]} issue(s):${C_NONE}"
-  for e in "${errors[@]}"; do
-    echo " - $e"
-  done
-  exit 1
-else
-  echo -e "${C_GREEN}All repositories synced successfully!${C_NONE}"
-fi
