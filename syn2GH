@@ -26,7 +26,7 @@ C_NONE='\033[0m'
 if [ -n "$1" ]; then
   COMMIT_MSG="$1"
 else
-  COMMIT_MSG="Automated commit on $(TZ='America/Regina' date)"
+  COMMIT_MSG="Automated commit from $(hostname) on $(TZ='America/Regina' date)"
 fi
 
 errors=()
@@ -72,7 +72,7 @@ process_repo() {
   OLD_HEAD=$(git rev-parse HEAD 2>/dev/null)
   git fetch origin >/dev/null 2>&1 || true
   if [ -n "$TRACKING_REF" ]; then
-    if ! git pull --rebase --autostash origin "$BRANCH_NAME"; then
+    if ! git pull --rebase --autostash origin "$BRANCH_NAME" >/dev/null 2>&1; then
       echo -e "${C_RED}  ! Pull failed. Resolve conflicts and re-run.${C_NONE}"
       errors+=("$repo_dir: pull failed")
       return
@@ -115,14 +115,25 @@ process_repo() {
   fi
 
   if [ -n "$TO_PUSH" ]; then
-    echo -e "${C_BLUE}4) Push:${C_GREEN} ↑ Commits to push:${C_NONE}"
-    echo -e "$TO_PUSH"
-    if ! git push origin "$BRANCH_NAME"; then
-      echo -e "${C_RED}  ! Push failed${C_NONE}"
+    # Attempt the push and capture all output (stdout & stderr)
+    PUSH_OUTPUT=$(git push origin "$BRANCH_NAME" 2>&1)
+    
+    # Check the exit code of the push command
+    if [ $? -ne 0 ]; then
+      # Push FAILED: Print context and the captured error output
+      echo -e "${C_BLUE}4) Push:${C_RED} ↑ Push FAILED. Details:${C_NONE}"
+      echo -e "$TO_PUSH"
+      echo -e "${C_RED}--- Git Error Output ---${C_NONE}"
+      echo -e "$PUSH_OUTPUT"
+      echo -e "${C_RED}------------------------${C_NONE}"
       errors+=("$repo_dir: push failed")
       return
+    else
+      # Push SUCCEEDED: Print a simple confirmation message
+      echo -e "${C_BLUE}4) Push:${C_GREEN} ✓ Pushed successfully.${C_NONE}"
     fi
   else
+    # No changes to push, this remains the same
     echo -e "${C_BLUE}4) Push:${C_GREEN} ✓ Already in sync.${C_NONE}"
   fi
 }
