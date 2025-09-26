@@ -90,7 +90,8 @@ process_repo() {
   git add -A
   if ! git diff --staged --quiet; then
     echo -e "${C_BLUE}2) Stage:${C_GREEN} Staged diff:${C_NONE}"
-    git diff --staged --stat | sed 's/^/   /'
+    # This line is changed to add red color to the diff stat output
+    git diff --staged --stat | sed "s/.*/   ${C_RED}&${C_NONE}/"
   else
     echo -e "${C_BLUE}2) Stage:${C_GREEN} ✓ Nothing to stage.${C_NONE}"
   fi
