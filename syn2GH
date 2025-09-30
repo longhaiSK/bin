@@ -1,6 +1,5 @@
 #!/bin/zsh
-
-# 
+ 
 # ===============================================
 # Sync ALL git repos under the specified roots
 # Usage:
