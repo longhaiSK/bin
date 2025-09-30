@@ -1,4 +1,4 @@
-#!/usr/bin/env zsh
+#!/bin/bash
 
 # ===============================================
 # Sync ALL git repos under the specified roots
