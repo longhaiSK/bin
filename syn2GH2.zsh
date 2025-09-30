@@ -1,10 +1,34 @@
 #!/bin/zsh
- 
+
+# Turn nounset on only after we set sane defaults
+set -e -o pipefail
+
+# PATH bootstrap (robust)
+for d in /opt/homebrew/bin /usr/local/bin; do
+  [[ -d $d ]] && PATH="$d:$PATH"
+done
+if command -v brew >/dev/null 2>&1; then
+  BREW_PREFIX="$(brew --prefix 2>/dev/null || true)"
+  if [[ -n "$BREW_PREFIX" && -d "$BREW_PREFIX/bin" ]]; then
+    PATH="$BREW_PREFIX/bin:$PATH"
+  fi
+fi
+export PATH
+
+# Provide defaults for variables your script uses later
+: "${REPO_DIR:=/Users/lol553/Github}"
+: "${REMOTE:=origin}"
+: "${BRANCH:=main}"
+: "${GIT_SSH_COMMAND:=ssh}"
+# add more as needed...
+
+# Now enable nounset once inputs have defaults
+set -u
 
 # ===============================================
 # Sync ALL git repos under the specified roots
 # Usage:
-#   bash syn2GH.sh "Your commit message here"
+#   zsh syn2GH "Your commit message here"
 # ===============================================
 
 # ---- Customize these search roots ----
@@ -16,9 +40,7 @@ EXCLUDE_REGEX='(/\.venv/|/node_modules/|/\.cargo/)'
 # -------------------------------------
 
 # ---- Colors ----
-
 C_BLUE=$'\033[0;34m'
-C_GREEN=$'\033[32m'
 C_GREEN=$'\033[32m'
 C_YELLOW=$'\033[0;33m'
 C_RED=$'\033[0;31m'
@@ -26,7 +48,8 @@ C_NONE=$'\033[0m'
 # ----------------
 
 # ---- Commit message ----
-if [ -n "$1" ]; then
+# SAFE with set -u: use ${1:-}
+if [ -n "${1:-}" ]; then
   COMMIT_MSG="$1"
 else
   COMMIT_MSG="Automated commit from $(hostname) on $(TZ='America/Regina' date)"
@@ -36,7 +59,7 @@ errors=()
 
 process_repo() {
   local repo_dir="$1"
-  echo # Adds a space between repo outputs
+  echo
   echo -e "${C_BLUE}Repo: ${C_YELLOW}${repo_dir}${C_NONE}"
 
   cd "$repo_dir" || { echo -e "${C_RED}  ! Cannot enter directory${C_NONE}"; errors+=("$repo_dir: cd failed"); return; }
@@ -93,7 +116,6 @@ process_repo() {
   git add -A
   if ! git diff --staged --quiet; then
     echo -e "${C_BLUE}2) Stage:${C_GREEN} Staged diff:${C_NONE}"
-    # This line is changed to add red color to the diff stat output
     git diff --staged --stat | sed "s/.*/   ${C_RED}&${C_NONE}/"
   else
     echo -e "${C_BLUE}2) Stage:${C_GREEN} ✓ Nothing to stage.${C_NONE}"
@@ -101,22 +123,16 @@ process_repo() {
 
   # 3) Commit
   if ! git diff --staged --quiet; then
-    # Attempt the commit and capture all output
     COMMIT_OUTPUT=$(git commit -m "$COMMIT_MSG" 2>&1)
-    
-    # Check the exit code of the commit command
     if [ $? -ne 0 ]; then
-      # Commit FAILED: Print the error output from git
       echo -e "${C_BLUE}3) Commit:${C_RED} ! Commit FAILED. Details:${C_NONE}"
       echo -e "$COMMIT_OUTPUT"
       errors+=("$repo_dir: commit failed")
       return
     else
-      # Commit SUCCEEDED: Print a simple confirmation message
       echo -e "${C_BLUE}3) Commit:${C_GREEN} ✓ Committed successfully.${C_NONE}"
     fi
   else
-    # No changes to commit, this remains the same
     echo -e "${C_BLUE}3) Commit:${C_GREEN} ✓ Nothing to commit.${C_NONE}"
   fi
 
@@ -128,12 +144,8 @@ process_repo() {
   fi
 
   if [ -n "$TO_PUSH" ]; then
-    # Attempt the push and capture all output (stdout & stderr)
     PUSH_OUTPUT=$(git push origin "$BRANCH_NAME" 2>&1)
-    
-    # Check the exit code of the push command
     if [ $? -ne 0 ]; then
-      # Push FAILED: Print context and the captured error output
       echo -e "${C_BLUE}4) Push:${C_RED} ↑ Push FAILED. Details:${C_NONE}"
       echo -e "$TO_PUSH"
       echo -e "${C_RED}--- Git Error Output ---${C_NONE}"
@@ -142,22 +154,17 @@ process_repo() {
       errors+=("$repo_dir: push failed")
       return
     else
-      # Push SUCCEEDED: Print a simple confirmation message
       echo -e "${C_BLUE}4) Push:${C_GREEN} ✓ Pushed successfully.${C_NONE}"
     fi
   else
-    # No changes to push, this remains the same
     echo -e "${C_BLUE}4) Push:${C_GREEN} ✓ Already in sync.${C_NONE}"
   fi
 }
-
 
 # ---- Build repo list without 'mapfile' ----
 all_git_dirs=()
 for root in "${ROOTS[@]}"; do
   [ -d "$root" ] || continue
-  # List .git dirs, strip '/.git', filter excludes, collect unique
-  # (Uniq: we sort then skip duplicates manually for Bash 3.2 portability)
   tmp_file="$(mktemp)"
   find "$root" -type d -name .git -prune -print 2>/dev/null | sed 's/\/\.git$//' | grep -vE "${EXCLUDE_REGEX}" | sort > "$tmp_file"
   last_line=""
@@ -174,7 +181,6 @@ if [ ${#all_git_dirs[@]} -eq 0 ]; then
   echo -e "${C_YELLOW}No git repositories found under configured ROOTS.${C_NONE}"
   exit 0
 fi
-
 
 # ---- Process each repo ----
 for repo in "${all_git_dirs[@]}"; do
