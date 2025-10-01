@@ -25,11 +25,6 @@ export PATH
 # Now enable nounset once inputs have defaults
 set -u
 
-# ===============================================
-# Sync ALL git repos under the specified roots
-# Usage:
-#   zsh syn2GH "Your commit message here"
-# ===============================================
 
 # ---- Customize these search roots ----
 ROOTS=(
@@ -51,7 +46,7 @@ C_NONE=$'\033[0m'
 if [ -n "${1:-}" ]; then
   COMMIT_MSG="$1"
 else
-  COMMIT_MSG="Automated commit from $(hostname) on $(TZ='America/Regina' date)"
+  COMMIT_MSG="syn2GH commit from $(hostname)"
 fi
 
 # ---- Run header with timestamp ----
@@ -64,7 +59,7 @@ echo -e "${C_BLUE}syn2GH start:${C_NONE} ${C_YELLOW}${START_TS}${C_NONE} on ${C_
 if [ -n "${1:-}" ]; then
   COMMIT_MSG="$1"
 else
-  COMMIT_MSG="Automated commit from $(hostname) on $(TZ='America/Regina' date)"
+  COMMIT_MSG="syn2GH commit from $(hostname)"
 fi
 
 errors=()
