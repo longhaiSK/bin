@@ -7,16 +7,6 @@ Recursively sanitize filenames for Windows compatibility by:
 - Trimming trailing spaces and dots
 - Avoiding Windows reserved base names (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
 - Resolving collisions by appending -2, -3, ...
-
-Usage:
-  # Preview: print only items that WOULD change (one path per line)
-  python3 sanitize_filenames.py --root . --dry-run
-
-  # Preview with mappings (src -> dst)
-  python3 sanitize_filenames.py --root . --dry-run --show-dest
-
-  # Apply changes (prints only items actually renamed)
-  python3 sanitize_filenames.py --root .
 """
 
 import argparse
@@ -30,6 +20,37 @@ RESERVED = {
     *(f"COM{i}" for i in range(1,10)),
     *(f"LPT{i}" for i in range(1,10)),
 }
+
+def print_usage_script(prog: str) -> None:
+    msg = f"""\
+Usage:
+  # Default: preview (dry-run + show-dest)
+  {prog} [--root PATH]
+
+  # Perform actual renames (no preview)
+  {prog} --root PATH --do
+
+  # Show concise usage
+  {prog} --usage
+
+Description:
+  Recursively sanitize filenames under PATH (default: current directory) to be Windows-compatible.
+
+Default behavior:
+  • With no flags, runs a dry-run and prints mappings 'src -> dst' for items that would change.
+
+Options:
+  --root PATH   Root directory to process (default: ".")
+  --do          Apply changes (no preview). Prints each rename as it happens.
+  --usage       Show this concise usage and exit.
+
+Rules applied:
+  • Replace illegal chars  < > : " / \\ | ? *  with '-'
+  • Trim trailing spaces and dots
+  • Avoid reserved base names (CON, PRN, AUX, NUL, COM1–9, LPT1–9)
+  • Resolve collisions by appending -2, -3, ...
+"""
+    print(msg)
 
 def sanitize_component(name: str) -> str:
     """Apply Windows filename rules to a single path component."""
@@ -69,7 +90,7 @@ def plan_changes_for_dir(root: str, names: List[str]) -> List[tuple]:
     for name in names:
         new = sanitize_component(name)
         if new == name:
-            planned.add(name)  # reserve its current name to avoid collisions
+            planned.add(name)  # reserve current name to avoid collisions
             continue
         unique = unique_in_dir(new, name, planned, existing)
         planned.add(unique)
@@ -80,13 +101,20 @@ def plan_changes_for_dir(root: str, names: List[str]) -> List[tuple]:
     return changes
 
 def main():
-    ap = argparse.ArgumentParser(description="Sanitize filenames for Windows compatibility.")
-    ap.add_argument("--root", default=".", help="Root directory to process (default: current dir).")
-    ap.add_argument("--dry-run", action="store_true",
-                    help="Preview changes without renaming anything.")
-    ap.add_argument("--show-dest", action="store_true",
-                    help="When used with --dry-run, show 'src -> dst' mappings instead of just src.")
+    ap = argparse.ArgumentParser(
+        description="Sanitize filenames for Windows compatibility (recursive).",
+        add_help=True
+    )
+    ap.add_argument("--root", default=".", help='Root directory to process (default: ".").')
+    ap.add_argument("--do", action="store_true",
+                    help="Apply changes (no preview). Default is dry-run with mapping output.")
+    ap.add_argument("--usage", action="store_true",
+                    help="Show concise usage with examples and exit.")
     args = ap.parse_args()
+
+    if args.usage:
+        print_usage_script(os.path.basename(__file__) or "sanitize_filenames.py")
+        raise SystemExit(0)
 
     rootdir = os.path.abspath(args.root)
     if not os.path.isdir(rootdir):
@@ -99,13 +127,14 @@ def main():
     for root, dirnames, filenames in os.walk(rootdir, topdown=False):
         names = dirnames + filenames
         changes = plan_changes_for_dir(root, names)
-        if args.dry_run:
+
+        if not args.do:
+            # Default: dry-run + show-dest
             for src, dst in changes:
-                if args.show_dest:
-                    print(f"{src} -> {dst}")
-                else:
-                    print(src)
+                print(f"{src} -> {dst}")
+            total_changes += len(changes)
         else:
+            # Perform renames, no preview
             for src, dst in changes:
                 try:
                     os.rename(src, dst)
@@ -114,10 +143,8 @@ def main():
                 except Exception as e:
                     print(f"[ERROR] {src} -> {dst} : {e}")
                     total_errors += 1
-            # count planned even if none printed due to errors
-        total_changes += (len(changes) if args.dry_run else 0)
 
-    if args.dry_run:
+    if not args.do:
         print(f"\nSummary (dry-run): {total_changes} items would be renamed.")
     else:
         print(f"\nSummary: {total_changes} items renamed, {total_errors} errors.")
