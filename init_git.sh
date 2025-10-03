@@ -10,20 +10,20 @@ FORCE=0
 print_usage() {
   cat <<'EOF'
 Usage:
-  init_git --dir <repo[/sub/dir]> [--user <github_user>] [--force]
+  init_git.sh --dir <repo[/sub/dir]> [--user <github_user>] [--force]
 
 Examples:
   # Clone entire repo
-  init_git --dir longhaiSK.github.io
+  init_git.sh --dir longhaiSK.github.io
 
   # Clone only a subdirectory via sparse-checkout
-  init_git --dir longhaiSK.github.io/teaching/stat845_rdemo
+  init_git.sh --dir longhaiSK.github.io/teaching/stat845_rdemo
 
   # Use a different GitHub username
-  init_git --dir some-repo/path --user otherUser
+  init_git.sh --dir some-repo/path --user otherUser
 
   # Overwrite existing local folder if present
-  init_git --dir longhaiSK.github.io/teaching/stat845_rdemo --force
+  init_git.sh --dir longhaiSK.github.io/teaching/stat845_rdemo --force
 EOF
 }
 
