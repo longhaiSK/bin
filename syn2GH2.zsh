@@ -46,7 +46,20 @@ C_NONE=$'\033[0m'
 if [ -n "${1:-}" ]; then
   COMMIT_MSG="$1"
 else
-  COMMIT_MSG="Automated commit from $(hostname) on $(TZ='America/Regina' date)"
+  COMMIT_MSG="syn2GH commit from $(hostname)"
+fi
+
+# ---- Run header with timestamp ----
+START_TS="$(TZ='America/Regina' date '+%Y-%m-%d %H:%M:%S %Z')"
+echo -e "${C_BLUE}syn2GH start:${C_NONE} ${C_YELLOW}${START_TS}${C_NONE} on ${C_GREEN}$(hostname)${C_NONE}"
+
+
+# ---- Commit message ----
+# SAFE with set -u: use ${1:-}
+if [ -n "${1:-}" ]; then
+  COMMIT_MSG="$1"
+else
+  COMMIT_MSG="syn2GH commit from $(hostname)"
 fi
 
 errors=()
