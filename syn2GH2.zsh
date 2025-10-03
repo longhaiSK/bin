@@ -25,11 +25,6 @@ export PATH
 # Now enable nounset once inputs have defaults
 set -u
 
-# ===============================================
-# Sync ALL git repos under the specified roots
-# Usage:
-#   zsh syn2GH "Your commit message here"
-# ===============================================
 
 # ---- Customize these search roots ----
 ROOTS=(
@@ -48,7 +43,6 @@ C_NONE=$'\033[0m'
 # ----------------
 
 # ---- Commit message ----
-# SAFE with set -u: use ${1:-}
 if [ -n "${1:-}" ]; then
   COMMIT_MSG="$1"
 else
