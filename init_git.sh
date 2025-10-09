@@ -78,8 +78,8 @@ if [[ -e "$CLONE_DIR" ]]; then
 fi
 
 # Clone with minimal history and no checkout
-echo "Cloning https://github.com/${GITHUB_USER}/${REPO}.git into '$CLONE_DIR'..."
-git clone --depth 1 --no-checkout "https://github.com/${GITHUB_USER}/${REPO}.git" "$CLONE_DIR"
+echo "Cloning git@github.com:${GITHUB_USER}/${REPO}.git into '$CLONE_DIR'..."
+git clone --depth 1 --no-checkout "git@github.com:${GITHUB_USER}/${REPO}.git" "$CLONE_DIR"
 
 cd "$CLONE_DIR"
 
