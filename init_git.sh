@@ -60,7 +60,7 @@ if [[ "$DIR_ARG" == */* ]]; then
 fi
 
 # Prepare workspace
-GITHUB_ROOT="$HOME/Github"
+declare -a GITHUB_ROOT=("${githubroot:-$HOME/Github}")
 mkdir -p "$GITHUB_ROOT"
 cd "$GITHUB_ROOT"
 
