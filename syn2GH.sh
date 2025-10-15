@@ -21,9 +21,8 @@ done
 set -u
 
 # ---------- Config ----------
-declare -a ROOTS=(
-  "$HOME/Github"
-)
+declare -a ROOTS=("${githubroot:-$HOME/Github}")
+
 EXCLUDE_REGEX='(/\.venv/|/node_modules/|/\.cargo/)'
 # ----------------------------
 
