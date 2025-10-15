@@ -7,6 +7,11 @@ GITHUB_USER="longhaiSK"
 DIR_ARG=""
 FORCE=0
 
+# Prepare workspace
+declare -a GITHUB_ROOT=("${githubroot:-$HOME/Github}")
+mkdir -p "$GITHUB_ROOT"
+cd "$GITHUB_ROOT"
+
 print_usage() {
   cat <<'EOF'
 Usage:
@@ -59,10 +64,6 @@ if [[ "$DIR_ARG" == */* ]]; then
   SUBPATH="${DIR_ARG#*/}"
 fi
 
-# Prepare workspace
-declare -a GITHUB_ROOT=("${githubroot:-$HOME/Github}")
-mkdir -p "$GITHUB_ROOT"
-cd "$GITHUB_ROOT"
 
 CLONE_DIR="$REPO"
 
