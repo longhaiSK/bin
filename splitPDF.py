@@ -11,10 +11,12 @@ def read_split_config_from_file(config_file_path):
     Expected format:
     Line 1: Path to the input PDF file (e.g., /path/to/document.pdf)
     Line 2+: Split specification (e.g., 1-5: output1.pdf)
-    Returns a tuple: (input_pdf_path, split_config_list) or (None, None) on error.
+    Returns a tuple: (input_pdf_path, split_config_list, original_lines_list) or (None, None, None) on error.
     """
     input_pdf_path = None
     split_config = []
+    original_lines = [] # Store original lines after the first line
+    input_pdf_line = "" # Store the first line separately
     try:
         with open(config_file_path, 'r') as f:
             lines = f.readlines()
@@ -22,44 +24,47 @@ def read_split_config_from_file(config_file_path):
             # Process first line for input PDF path
             if not lines:
                 print(f"Error: Configuration file '{config_file_path}' is empty.")
-                return None, None
-            input_pdf_path = lines[0].strip()
-            if not input_pdf_path or not input_pdf_path.lower().endswith('.pdf'):
+                return None, None, None
+            input_pdf_line = lines[0].strip() # Store the first line
+            if not input_pdf_line or not input_pdf_line.lower().endswith('.pdf'):
                 print(f"Error: First line in '{config_file_path}' must be a valid PDF file path.")
-                print(f"       Found: '{input_pdf_path}'")
-                return None, None
+                print(f"       Found: '{input_pdf_line}'")
+                return None, None, None
+            input_pdf_path = input_pdf_line # Assign if valid
 
             # Process subsequent lines for split configurations
             for line_num, line in enumerate(lines[1:], 2): # Start line count from 2
-                line = line.strip()
-                if not line or line.startswith('#'): # Skip empty lines and comments
+                original_line_text = line.strip()
+                original_lines.append(original_line_text) # Store the raw line
+
+                if not original_line_text or original_line_text.startswith('#'): # Skip processing for comments/blanks
                     continue
 
                 # Use regex to capture pages_spec and filename
-                # Allows spaces around ':'
-                match = re.match(r'([^:]+?)\s*:\s*(.+\.pdf)$', line, re.IGNORECASE)
+                match = re.match(r'([^:]+?)\s*:\s*(.+\.pdf)$', original_line_text, re.IGNORECASE)
                 if match:
                     pages_spec = match.group(1).strip()
                     output_filename = match.group(2).strip()
                     if not pages_spec:
-                         print(f"Warning: Page specification missing on line {line_num}. Skipping: '{line}'")
+                         print(f"Warning: Page specification missing on line {line_num}. Skipping: '{original_line_text}'")
                          continue
-                    split_config.append({'filename': output_filename, 'pages': pages_spec})
+                    # Store original line index relative to the 'original_lines' list (starts at 0)
+                    split_config.append({'filename': output_filename, 'pages': pages_spec, 'line_index': len(original_lines) - 1})
                 else:
-                    print(f"Warning: Skipping invalid line {line_num} in config file: '{line}'")
+                    print(f"Warning: Skipping invalid format on line {line_num}: '{original_line_text}'")
                     print("         Expected format: pages_spec: output_filename.pdf")
 
     except FileNotFoundError:
         print(f"Error: Configuration file not found at '{config_file_path}'")
-        return None, None # Indicate error
+        return None, None, None # Indicate error
     except Exception as e:
         print(f"Error reading configuration file '{config_file_path}': {e}")
-        return None, None # Indicate error
+        return None, None, None # Indicate error
 
     if not split_config:
         print(f"Warning: No valid split configurations found in '{config_file_path}' after the first line.")
-        # Proceed even if no splits, maybe user just wanted to check input file path
-    return input_pdf_path, split_config
+
+    return input_pdf_path, split_config, original_lines
 
 def parse_page_string(page_str, total_pages):
     """
@@ -128,88 +133,91 @@ def parse_page_string(page_str, total_pages):
     return sorted_indices, friendly_string
 
 
-def split_pdf_from_config(input_pdf_path, config):
+def split_pdf_from_config(input_pdf_path, config, original_lines):
     """
-    Splits the input PDF based on the provided configuration list.
+    Splits the input PDF based on the configuration list.
+    Prints status line by line based on original_lines.
     """
-    created_files_summary = []
+    files_created_count = 0
+    total_pages_in_input = 0
+    # Create a mapping from original line index to config entry for easy lookup
+    config_map = {entry['line_index']: entry for entry in config}
+
     try:
         reader = PdfReader(input_pdf_path)
-        total_pages = len(reader.pages)
+        total_pages_in_input = len(reader.pages)
 
-        if total_pages == 0:
-            print("Error: Input PDF appears to be empty.")
+        if total_pages_in_input == 0:
+            print(f"Error: Input PDF '{input_pdf_path}' appears to be empty.")
             return
 
-        print(f"Input PDF '{input_pdf_path}' has {total_pages} pages.")
-        print(f"Processing {len(config)} split configurations...")
+        print(f"Processing split instructions for '{input_pdf_path}' ({total_pages_in_input} pages):")
 
-        for split_info in config:
-            output_filename = split_info['filename']
-            page_str = split_info['pages']
-            page_indices = []
-            friendly_page_str = page_str # Default in case parsing fails
-
-            try:
-                page_indices, friendly_page_str = parse_page_string(page_str, total_pages)
-            except ValueError as e:
-                print(f"  Error parsing page spec '{page_str}' for '{output_filename}': {e}. Skipping.")
-                continue # Skip this file but try others
-
-            if not page_indices:
-                print(f"  Skipping '{output_filename}' as page spec '{page_str}' resulted in no pages.")
+        for idx, line_text in enumerate(original_lines):
+            if not line_text or line_text.startswith('#'):
+                # print(line_text) # Optionally show comments/blanks
                 continue
 
-            writer = PdfWriter()
+            entry = config_map.get(idx)
+            if not entry:
+                # This line had an invalid format during parsing
+                print(line_text)
+                print("  Error: Invalid line format.")
+                continue
+
+            # Valid config entry exists for this line
+            output_filename = entry['filename']
+            page_str = entry['pages']
+            error_message = None
+            num_split_pages = 0
+
             try:
+                page_indices, friendly_page_str = parse_page_string(page_str, total_pages_in_input)
+
+                if not page_indices:
+                    raise ValueError("Page spec resulted in no pages.")
+
+                writer = PdfWriter()
                 for index in page_indices:
                     writer.add_page(reader.pages[index])
 
-                # Removed check for existing file
-                # if os.path.exists(output_filename):
-                #    print(f"  Note: Overwriting existing file '{output_filename}'.")
-
                 with open(output_filename, "wb") as f_out:
                     writer.write(f_out)
-                # Store info for final summary
-                created_files_summary.append({
-                    'filename': output_filename,
-                    'pages_str': friendly_page_str,
-                    'count': len(page_indices)
-                })
 
+                num_split_pages = len(page_indices)
+                files_created_count += 1
+                # Success!
+
+            except ValueError as e:
+                error_message = f"Parsing page spec '{page_str}': {e}"
             except IndexError:
-                 print(f"  Error: Page index out of range while creating '{output_filename}'. Check page numbers. Skipping.")
+                 error_message = "Page index out of range. Check page numbers."
             except Exception as e:
-                 print(f"  Error creating '{output_filename}': {e}. Skipping.")
+                 error_message = f"Creating '{output_filename}': {e}"
+
+            # Print the original line and status
+            if error_message:
+                print(line_text)
+                print(f"  Error: {error_message}")
+            else:
+                print(f"{line_text} ✓") # Append checkmark on success
 
     except FileNotFoundError:
-        print(f"Error: Input file not found at '{input_pdf_path}'")
+        print(f"Error: Input PDF not found at '{input_pdf_path}'")
         return # Cannot proceed
     except Exception as e:
         print(f"An unexpected error occurred reading the input PDF: {e}")
         return # Cannot proceed
 
     # --- Final Summary ---
-    print("\n--- Split Summary ---")
-    if created_files_summary:
-        # Determine max length for alignment
-        max_page_len = max(len(s['pages_str']) for s in created_files_summary)
-        max_file_len = max(len(s['filename']) for s in created_files_summary)
-
-        for summary in created_files_summary:
-            pages_part = f"Pages {summary['pages_str']}".ljust(max_page_len + 6) # +6 for "Pages "
-            file_part = summary['filename'].ljust(max_file_len)
-            count_part = f"({summary['count']} page{'s' if summary['count'] != 1 else ''})"
-            print(f"{pages_part} -> {file_part} {count_part}")
-        print(f"\nSuccessfully created {len(created_files_summary)} PDF file(s).")
+    if files_created_count > 0:
+        print(f"\nSuccessfully created {files_created_count} PDF file(s).")
     else:
-        print("No output files were created.")
+        print("\nNo output files were created.")
     # ---------------------
 
 if __name__ == "__main__":
     # --- Argument Parsing ---
-    # Updated config_example with generic filenames
     config_example = """
 Configuration file format:
 - The first line MUST be the path to the input PDF file.
@@ -241,17 +249,12 @@ last: file3.pdf
     config_file_path = args.config_file
 
     print(f"Reading split configuration from: '{config_file_path}'")
-    input_pdf, split_config = read_split_config_from_file(config_file_path)
+    input_pdf, split_config, original_config_lines = read_split_config_from_file(config_file_path)
 
     # Proceed only if both input_pdf and split_config were successfully read
-    # read_split_config_from_file returns (None, None) on file read error
-    # It returns (path, []) if only input PDF path is found but no splits
     if input_pdf is not None:
-        if split_config: # Check if the list of splits is not empty
-            split_pdf_from_config(input_pdf, split_config)
-        else:
-             print("Configuration file parsed, but no valid split instructions found after the first line. No files were split.")
-             sys.exit(0) # Not an error, just nothing to do
+        # Pass original lines to the split function
+        split_pdf_from_config(input_pdf, split_config, original_config_lines)
     else:
         # Error message already printed by read_split_config_from_file
         sys.exit(1)

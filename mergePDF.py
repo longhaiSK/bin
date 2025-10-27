@@ -8,39 +8,49 @@ from pypdf import PdfReader, PdfWriter, PageRange # No change needed here
 def read_merge_config_from_file(config_file_path):
     """
     Reads the merge configuration from a text file.
-    Expected format per line: 'input_filename.pdf: [pages_spec]'
-    Example: 'report.pdf: 1-5' or 'appendix.pdf:' (all pages)
-    Returns a list of dictionaries [{'filename': '...', 'pages': '... or None'}, ...]
+    Expected format per line: 'input_filename.pdf [(Bookmark Title)]: [pages_spec]'
+    Returns a list of dictionaries [{'filename': '...', 'bookmark': '... or None', 'pages': '... or None', 'original_line': '...'}, ...]
     """
     config = []
+    original_lines = [] # Store original lines to iterate through later for printing
     try:
         with open(config_file_path, 'r') as f:
-            for line_num, line in enumerate(f, 1):
-                line = line.strip()
-                if not line or line.startswith('#'): # Skip empty lines and comments
+            lines = f.readlines()
+            for line_num, line in enumerate(lines, 1):
+                original_line_text = line.strip()
+                original_lines.append(original_line_text) # Store the raw line
+
+                if not original_line_text or original_line_text.startswith('#'): # Skip processing for comments/blanks
                     continue
 
-                # Use regex to capture filename and optional pages_spec
-                # Allows spaces around ':' and handles missing pages_spec
-                match = re.match(r'(.+\.pdf)\s*(?::\s*(.*?)\s*)?$', line, re.IGNORECASE)
+                # Regex to capture filename, optional bookmark title in (), and optional pages_spec
+                match = re.match(r'(.+\.pdf)\s*(?:\(\s*(.*?)\s*\))?\s*(?::\s*(.*?)\s*)?$', original_line_text, re.IGNORECASE)
+
                 if match:
                     filename = match.group(1).strip()
-                    pages_spec = match.group(2).strip() if match.group(2) else None # None if pages_spec is missing
-                    config.append({'filename': filename, 'pages': pages_spec})
+                    bookmark_title = match.group(2).strip() if match.group(2) else None # Captured title or None
+                    pages_spec = match.group(3).strip() if match.group(3) else None # None if pages_spec is missing
+                    # Store original line index to link back later
+                    config.append({'filename': filename, 'bookmark': bookmark_title, 'pages': pages_spec, 'line_index': len(original_lines) - 1})
                 else:
-                    print(f"Warning: Skipping invalid line {line_num} in config file: '{line}'")
-                    print("         Expected format: filename.pdf: [pages_spec] (pages_spec is optional)")
+                    # Mark line as invalid in original_lines for later error reporting
+                     print(f"Warning: Invalid format on line {line_num}: '{original_line_text}'. Skipping.")
+                     # Find the corresponding original line and mark it somehow, maybe add error?
+                     # Let's handle this in the merge function by checking if a config entry exists for the line.
+
     except FileNotFoundError:
         print(f"Error: Configuration file not found at '{config_file_path}'")
-        return None # Indicate error
+        return None, None # Indicate error
     except Exception as e:
         print(f"Error reading configuration file '{config_file_path}': {e}")
-        return None # Indicate error
+        return None, None # Indicate error
 
     if not config:
         print(f"Warning: No valid configurations found in '{config_file_path}'.")
-    return config
+    # Return both parsed config and the original lines
+    return config, original_lines
 
+# --- parse_merge_page_string remains the same ---
 def parse_merge_page_string(page_str, total_pages):
     """
     Parses a page string (e.g., "1-5", "6", "last") or None (all pages)
@@ -108,41 +118,55 @@ def parse_merge_page_string(page_str, total_pages):
     if not sorted_indices:
          raise ValueError(f"Page string '{page_str}' resulted in no pages.")
     return sorted_indices
+# --- End of parse_merge_page_string ---
 
-def merge_pdfs_from_config(config, output_pdf_path):
+def merge_pdfs_from_config(config, original_lines, output_pdf_path):
     """
     Merges pages from multiple PDFs based on the configuration list.
     Writes the merged output to output_pdf_path.
-    Adds bookmarks (TOC) for each input file.
+    Adds bookmarks (TOC) for each input file using specified or default titles.
+    Prints status line by line based on original_lines.
     """
     merger = PdfWriter()
     total_pages_merged = 0
-    print(f"Starting merge process. Output will be saved to '{output_pdf_path}'.")
+    # Create a mapping from original line index to config entry for easy lookup
+    config_map = {entry['line_index']: entry for entry in config}
 
-    for entry in config:
+    print(f"Processing merge instructions for output '{output_pdf_path}':")
+
+    for idx, line_text in enumerate(original_lines):
+        if not line_text or line_text.startswith('#'):
+            # Optionally print comments/blanks if desired, or just skip
+            # print(line_text) # Uncomment to show comments/blanks
+            continue
+
+        entry = config_map.get(idx)
+        if not entry:
+            # This line was invalid during parsing
+            print(line_text)
+            print("  Error: Invalid line format.")
+            continue
+
+        # Valid config entry exists for this line
         input_filename = entry['filename']
         page_spec = entry['pages'] # This can be None
+        custom_bookmark_title = entry['bookmark'] # This can be None
+        error_message = None # Store potential errors for this line
 
         try:
-            print(f"  Processing '{input_filename}' (Pages: {page_spec if page_spec else 'All'})... ", end="")
             reader = PdfReader(input_filename)
             num_input_pages = len(reader.pages)
             if num_input_pages == 0:
-                print("Skipped (empty PDF).")
-                continue
+                raise ValueError("Input PDF is empty.")
 
             page_indices = parse_merge_page_string(page_spec, num_input_pages)
 
             if not page_indices:
-                print("Skipped (no pages selected or specified).")
-                continue
+                 raise ValueError("No pages selected or specified.")
 
             # --- Add Bookmark/TOC Entry ---
-            # Get the current page number *before* adding pages (0-based)
             bookmark_target_page_index = len(merger.pages)
-            # Get the base filename without extension for the title
-            bookmark_title = os.path.splitext(os.path.basename(input_filename))[0]
-            # Add the outline item (bookmark)
+            bookmark_title = custom_bookmark_title if custom_bookmark_title else os.path.splitext(os.path.basename(input_filename))[0]
             merger.add_outline_item(bookmark_title, bookmark_target_page_index)
             # --- End Bookmark ---
 
@@ -152,21 +176,29 @@ def merge_pdfs_from_config(config, output_pdf_path):
 
             num_added = len(page_indices)
             total_pages_merged += num_added
-            print(f"Added {num_added} pages.")
+            # Success! No error message.
 
         except FileNotFoundError:
-            print(f"Error: Input file '{input_filename}' not found. Skipping.")
+            error_message = f"Input file '{input_filename}' not found."
         except ValueError as e:
-            print(f"Error parsing page spec for '{input_filename}': {e}. Skipping.")
+            error_message = f"Parsing page spec '{page_spec}': {e}"
         except Exception as e:
-            print(f"Error processing '{input_filename}': {e}. Skipping.")
+            error_message = f"Processing '{input_filename}': {e}"
+
+        # Print the original line and status
+        if error_message:
+            print(line_text)
+            print(f"  Error: {error_message}")
+        else:
+            print(f"{line_text} ✓") # Append checkmark on success
 
     # Write the final merged PDF
     if total_pages_merged > 0:
         try:
             with open(output_pdf_path, "wb") as f_out:
                 merger.write(f_out)
-            print(f"\nSuccessfully merged {total_pages_merged} pages with bookmarks into '{output_pdf_path}'.") # Updated message
+            # Simplified final message
+            print(f"\n\"{output_pdf_path}\" with {total_pages_merged} pages created!")
         except Exception as e:
             print(f"\nError writing output file '{output_pdf_path}': {e}")
     else:
@@ -180,46 +212,46 @@ if __name__ == "__main__":
 Example format for the merge configuration file:
 # Lines starting with # are comments and ignored.
 # Blank lines are ignored.
-# Format: input_file.pdf: [page_spec]
+# Format: input_file.pdf [(Bookmark Title)]: [page_spec]
+# If (Bookmark Title) is omitted, the base filename is used.
 # If page_spec is omitted, all pages are included.
 # Page numbers are 1-based. Use '-' for ranges, ',' for multiples, 'last'.
 
-title_page.pdf: 1
-main_report.pdf: 1-10
+title_page.pdf (Title): 1
+main_report.pdf (Proposal Body): 1-10
 appendix_a.pdf:
-appendix_b.pdf: 3, 5-last
+appendix_b.pdf (Data Appendix): 3, 5-last
+references.pdf (Bibliography)
 """
     parser = argparse.ArgumentParser(
-        description='Merges pages from multiple PDF files based on a configuration file, adding bookmarks for each input file.', # Updated description
+        description='Merges pages from multiple PDF files based on a configuration file, adding bookmarks for each input file.',
         epilog=config_example,
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    # Changed config to be a positional argument
     parser.add_argument('config_file',
                         help='Path to the merge configuration file (e.g., mergePDF.txt).')
-    # Kept output as an optional argument
     parser.add_argument('--output',
                         help='Path for the final merged PDF file (default: derived from config file name, e.g., input.pdf).')
     args = parser.parse_args()
     # -----------------------
 
     config_file = args.config_file
-
-    # Determine default output filename based on config filename
     config_basename = os.path.splitext(os.path.basename(config_file))[0]
     default_output_file = f"{config_basename}.pdf"
-
-    # Use the provided output filename if given, otherwise use the default
     output_file = args.output if args.output else default_output_file
 
     print(f"Reading merge configuration from: '{config_file}'")
-    merge_config = read_merge_config_from_file(config_file)
+    # Read both parsed config and original lines
+    merge_config, original_config_lines = read_merge_config_from_file(config_file)
 
-    if merge_config: # Check if list is not None and not empty
-        merge_pdfs_from_config(merge_config, output_file)
-    elif merge_config is None: # Explicit check for file read error
+    if merge_config is not None and original_config_lines is not None:
+        # Pass original lines to the merge function
+        merge_pdfs_from_config(merge_config, original_config_lines, output_file)
+    elif merge_config is None and original_config_lines is None:
+        # Error during file reading
         sys.exit(1)
-    else: # Config file was empty or contained no valid lines
+    else:
+        # Config file might be empty but readable
         print("Exiting as configuration file was empty or contained no valid merge instructions.")
         sys.exit(0)
 
