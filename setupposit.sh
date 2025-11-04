@@ -5,7 +5,7 @@ set -e
 # 0) Dotfiles (.bashrc/.bash_profile)
 # ---------------------------
 cat > "$HOME/.bashrc" <<'EOF'
-export githubroot="/cloud/project/Github"
+export githubroot="$HOME/Github"
 export PATH="$githubroot/bin/:$HOME/bin/:$PATH"
 EOF
 
