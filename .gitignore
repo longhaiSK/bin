@@ -1,2 +1,4 @@
 
 # Ignore 'secrets/' (added by script)
+
+# Ignore '*.pdf' (added by script)
