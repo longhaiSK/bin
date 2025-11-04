@@ -1,3 +1,4 @@
+#!/bin/sh
 
 #!/usr/bin/env bash
 set -euo pipefail
@@ -7,41 +8,58 @@ GITHUB_USER="longhaiSK"
 DIR_ARG=""
 FORCE=0
 
-# Prepare workspace
-declare -a GITHUB_ROOT=("${githubroot:-$HOME/Github}")
+# Workspace root (env var 'githubroot' if set; else ~/Github)
+GITHUB_ROOT="${githubroot:-$HOME/Github}"
 mkdir -p "$GITHUB_ROOT"
 cd "$GITHUB_ROOT"
 
 print_usage() {
   cat <<'EOF'
 Usage:
-  init_git.sh --dir <repo[/sub/dir]> [--user <github_user>] [--force]
+  init_git.sh <repo[/sub/dir]> [--user <github_user>|-u <github_user>] [--force|-f]
 
 Examples:
   # Clone entire repo
-  init_git.sh --dir longhaiSK.github.io
+  init_git.sh longhaiSK.github.io
 
   # Clone only a subdirectory via sparse-checkout
-  init_git.sh --dir longhaiSK.github.io/teaching/stat845_rdemo
+  init_git.sh longhaiSK.github.io/teaching/stat845_rdemo
 
   # Use a different GitHub username
-  init_git.sh --dir some-repo/path --user otherUser
+  init_git.sh some-repo/path --user otherUser
 
   # Overwrite existing local folder if present
-  init_git.sh --dir longhaiSK.github.io/teaching/stat845_rdemo --force
+  init_git.sh longhaiSK.github.io/teaching/stat845_rdemo --force
 EOF
 }
 
-# Parse args
+# --- Parse args: first non-option is DIR_ARG ---
+if [[ $# -eq 0 ]]; then
+  echo "Error: missing <repo[/sub/dir]>."
+  print_usage
+  exit 1
+fi
+
+# Grab first non-option as DIR_ARG, then shift it away
+case "${1:-}" in
+  -*)
+    echo "Error: first argument must be <repo[/sub/dir]>, not an option."
+    print_usage
+    exit 1
+    ;;
+  *)
+    DIR_ARG="$1"
+    shift
+    ;;
+esac
+
+# Remaining options
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --dir)
-      [[ $# -ge 2 ]] || { echo "Error: --dir requires a value"; exit 1; }
-      DIR_ARG="$2"; shift 2 ;;
-    --user)
+    --user|-u)
       [[ $# -ge 2 ]] || { echo "Error: --user requires a value"; exit 1; }
       GITHUB_USER="$2"; shift 2 ;;
-    --force)
+    --force|-f)
       FORCE=1; shift ;;
     -h|--help)
       print_usage; exit 0 ;;
@@ -51,11 +69,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$DIR_ARG" ]]; then
-  echo "Error: --dir is required."
-  print_usage
-  exit 1
-fi
+# Normalize DIR_ARG (tolerate accidental leading './' or '/')
+DIR_ARG="${DIR_ARG#./}"
+DIR_ARG="${DIR_ARG#/}"
 
 # Split DIR_ARG into repo and optional subpath
 REPO="${DIR_ARG%%/*}"
@@ -63,7 +79,6 @@ SUBPATH=""
 if [[ "$DIR_ARG" == */* ]]; then
   SUBPATH="${DIR_ARG#*/}"
 fi
-
 
 CLONE_DIR="$REPO"
 
@@ -102,3 +117,4 @@ else
   echo "Fetched entire repository."
 fi
 echo "Location: $GITHUB_ROOT/$CLONE_DIR"
+
