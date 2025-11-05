@@ -8,7 +8,7 @@ C_GREEN=$'\033[32m'
 C_YELLOW=$'\033[0;33m'
 C_RED=$'\033[0;31m'
 C_NONE=$'\033[0m'
-COMMIT_MSG="${1:-Auto-sync from Posit Cloud}"
+COMMIT_MSG="${1:-git_syn.sh from $(hostname)}"
 # ---------------------------------------------
 
 echo -e "${C_BLUE}--- Starting Git Sync for current directory ---${C_NONE}"
