@@ -11,6 +11,7 @@ import argparse
 import io
 import math
 import sys
+import getpass  # Added for secure password input
 from pathlib import Path
 
 import fitz  # PyMuPDF
@@ -97,9 +98,7 @@ def build_parser():
     epilog = f"""
 Examples:
   {prog} input.pdf
-  {prog} input.pdf --dpi 300 --noise 0.9 --alpha 0.3 --blur 2.0 --lines 0
-  {prog} input.pdf -o out.pdf
-  {prog} input.pdf --pass SECRET123
+  {prog} input.pdf --dpi 300 --noise 0.9 --alpha 0.3 --blur 2.0
 """
     ap = argparse.ArgumentParser(
         prog=prog,
@@ -115,11 +114,10 @@ Examples:
     ap.add_argument("--blur", type=float, default=2.0, help="Gaussian blur radius in pixels (default: 2.0)")
     ap.add_argument("--lines", type=int, default=0, help="Number of faint sinusoidal lines per page (default: 0)")
     ap.add_argument("--seed", type=int, default=12345, help="Random seed (default: 12345)")
-    ap.add_argument("--pass", dest="pdf_pass", help="Set a PDF password and disallow copy/extract via permissions")
     return ap
 
 
-def process_pdf(input_pdf: Path, output_pdf: Path, dpi=300, noise=0.9, alpha=0.3, blur=2.0, lines=0, seed=12345, pdf_pass=None):
+def process_pdf(input_pdf: Path, output_pdf: Path, dpi=300, noise=0.9, alpha=0.3, blur=2.0, lines=0, seed=12345, user_pw=None, owner_pw=None):
     src = fitz.open(str(input_pdf))
     out = fitz.open()
 
@@ -138,13 +136,16 @@ def process_pdf(input_pdf: Path, output_pdf: Path, dpi=300, noise=0.9, alpha=0.3
         new_page.insert_image(new_page.rect, stream=buf.getvalue())
 
     save_kwargs = {}
-    if pdf_pass:
+    
+    # Logic: If a user password is provided, enable encryption
+    if user_pw:
         save_kwargs.update(
             encryption=fitz.PDF_ENCRYPT_AES_256,
-            owner_pw=pdf_pass,
-            user_pw=pdf_pass,
-            permissions=0,
+            owner_pw=owner_pw,  # Master key (hardcoded in main)
+            user_pw=user_pw,    # View key (typed by user)
+            permissions=0,      # 0 = Disable all permissions (print/copy/mod)
         )
+        
     out.save(str(output_pdf), **save_kwargs)
     src.close()
     out.close()
@@ -164,6 +165,13 @@ def main():
 
     out_path = Path(args.output).expanduser().resolve() if args.output else unique_with_suffix(in_path)
 
+    # --- NEW: Ask for password interactively ---
+    print(f"Processing: {in_path.name}")
+    user_password = getpass.getpass("Enter password to encrypt PDF (will be required to view): ")
+    
+    # Hardcoded owner password as requested
+    OWNER_PASSWORD = "usasklli219"
+
     process_pdf(
         in_path,
         out_path,
@@ -173,11 +181,15 @@ def main():
         blur=args.blur,
         lines=args.lines,
         seed=args.seed,
-        pdf_pass=args.pdf_pass,
+        user_pw=user_password,
+        owner_pw=OWNER_PASSWORD
     )
+    
     print(f"Saved: {out_path}")
-    if args.pdf_pass:
-        print("✔ Encrypted with AES-256; copy/extract permissions disabled.")
+    if user_password:
+        print("✔ Encrypted with AES-256.")
+        print("✔ Operations disabled: Printing, Copying, Modification.")
+        print(f"✔ Owner Password set to: {OWNER_PASSWORD}")
 
 
 if __name__ == "__main__":
