@@ -54,21 +54,22 @@ function ignore_and_clean() {
     # 3. Remove files matching the pattern from Git tracking (but keep local copy)
     echo "\n>>> 2. Removing tracked files matching '$pattern' using 'git rm --cached'..."
     
-    # Use 'git ls-files --cached' to find files that are currently tracked (in the index) and match the pattern.
-    # This replaces the problematic '-i' flag to ensure compatibility.
-    local tracked_files=$(git ls-files --cached -- "$pattern")
+    # Find tracked files matching the pattern, outputting null-terminated list
+    # The -z flag is critical for handling filenames with spaces correctly.
+    local tracked_files
+    tracked_files=$(git ls-files --cached -z -- "$pattern")
     
     if [[ -z "$tracked_files" ]]; then
         echo "✅ No currently tracked files found matching '$pattern'. Skipping 'git rm --cached'."
     else
         echo "Found the following tracked files to remove from index (retaining local copy):"
-        echo "$tracked_files" | while read -r file; do
-            echo "   - $file"
-        done
         
-        # Execute the removal
-        # Use a subshell and 'xargs' for robust handling of file names with spaces
-        echo "$tracked_files" | xargs -r git rm --cached
+        # Safely display the null-terminated file list for the user
+        echo "$tracked_files" | tr '\0' '\n' | sed 's/^/   - /'
+
+        # Execute the removal using xargs -0 to read the null-terminated list safely
+        # Use printf instead of echo to ensure no trailing newline is added, which can cause xargs issues.
+        printf "%s" "$tracked_files" | xargs -0 git rm --cached
         
         if [[ $? -eq 0 ]]; then
             echo "✅ Successfully removed matching files from Git index."
