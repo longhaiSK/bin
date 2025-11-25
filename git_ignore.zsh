@@ -1,4 +1,4 @@
-#!/usr/bin/zsh
+#!/bin/zsh
 #
 # Function to add a pattern to .gitignore, remove tracked files matching that pattern,
 # commit the changes, and push to the 'main' branch.
@@ -54,8 +54,9 @@ function ignore_and_clean() {
     # 3. Remove files matching the pattern from Git tracking (but keep local copy)
     echo "\n>>> 2. Removing tracked files matching '$pattern' using 'git rm --cached'..."
     
-    # Use 'git ls-files' to find files that are currently tracked and match the pattern
-    local tracked_files=$(git ls-files -i --exclude-from="$gitignore_file" -- "$pattern")
+    # Use 'git ls-files --cached' to find files that are currently tracked (in the index) and match the pattern.
+    # This replaces the problematic '-i' flag to ensure compatibility.
+    local tracked_files=$(git ls-files --cached -- "$pattern")
     
     if [[ -z "$tracked_files" ]]; then
         echo "✅ No currently tracked files found matching '$pattern'. Skipping 'git rm --cached'."
