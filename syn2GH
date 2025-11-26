@@ -15,21 +15,19 @@ if command -v brew >/dev/null 2>&1; then
 fi
 export PATH
 
-# Provide defaults for variables your script uses later
+# Provide defaults for variables
 : "${REPO_DIR:=/Users/lol553/Github}"
 : "${REMOTE:=origin}"
 : "${BRANCH:=main}"
 : "${GIT_SSH_COMMAND:=ssh}"
-# add more as needed...
 
-# Now enable nounset once inputs have defaults
+# Now enable nounset
 set -u
-
 
 # ---- Customize these search roots ----
 declare -a ROOTS=("${githubroot:-$HOME/Github}")
 
-# Exclude heavy/noisy directories (regex for grep -vE)
+# Exclude heavy/noisy directories
 EXCLUDE_REGEX='(/\.venv/|/node_modules/|/\.cargo/)'
 # -------------------------------------
 
@@ -39,7 +37,6 @@ C_GREEN=$'\033[32m'
 C_YELLOW=$'\033[0;33m'
 C_RED=$'\033[0;31m'
 C_NONE=$'\033[0m'
-# ----------------
 
 # ---- Commit message ----
 if [ -n "${1:-}" ]; then
@@ -48,49 +45,30 @@ else
   COMMIT_MSG="syn2GH commit from $(hostname)"
 fi
 
-# ---- Run header with timestamp ----
+# ---- Run header ----
 START_TS="$(TZ='America/Regina' date '+%Y-%m-%d %H:%M:%S %Z')"
 echo -e "${C_BLUE}syn2GH start:${C_NONE} ${C_YELLOW}${START_TS}${C_NONE} on ${C_GREEN}$(hostname)${C_NONE}"
-
-
-# ---- Commit message ----
-# SAFE with set -u: use ${1:-}
-if [ -n "${1:-}" ]; then
-  COMMIT_MSG="$1"
-else
-  COMMIT_MSG="syn2GH commit from $(hostname)"
-fi
 
 errors=()
 
 process_repo() {
   local repo_dir="$1"
-  echo
-  echo -e "${C_BLUE}Repo: ${C_YELLOW}${repo_dir}${C_NONE}"
-
-  cd "$repo_dir" || { echo -e "${C_RED}  ! Cannot enter directory${C_NONE}"; errors+=("$repo_dir: cd failed"); return; }
+  
+  # Go into directory silently first
+  cd "$repo_dir" || return
 
   # Ensure it's a git repo
-  if ! git rev-parse --git-dir >/dev/null 2>&1; then
-    echo -e "${C_YELLOW}  ! Not a git repo (skipping)${C_NONE}"
-    return
-  fi
+  if ! git rev-parse --git-dir >/dev/null 2>&1; then return; fi
 
   # Current branch (skip detached HEAD)
   BRANCH_NAME=$(git symbolic-ref --quiet --short HEAD 2>/dev/null)
-  if [ -z "$BRANCH_NAME" ]; then
-    echo -e "${C_YELLOW}  ! Detached HEAD (skipping)${C_NONE}"
-    return
-  fi
+  if [ -z "$BRANCH_NAME" ]; then return; fi
 
   # Ensure 'origin' remote exists
-  if ! git remote get-url origin >/dev/null 2>&1; then
-    echo -e "${C_YELLOW}  ! No 'origin' remote (skipping)${C_NONE}"
-    return
-  fi
+  if ! git remote get-url origin >/dev/null 2>&1; then return; fi
 
   # Upstream tracking (silently attempt to set if missing)
-  TRACKING_REF=$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null)
+  TRACKING_REF=$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || true)
   if [ -z "$TRACKING_REF" ]; then
     DEFAULT_REMOTE_BRANCH=$(git remote show origin 2>/dev/null | awk '/HEAD branch/ {print $NF}')
     if [ -n "$DEFAULT_REMOTE_BRANCH" ]; then
@@ -100,9 +78,47 @@ process_repo() {
     fi
   fi
 
+  # ---------------------------------------------------------
+  # CHECK STATUS: Should we process this repo?
+  # ---------------------------------------------------------
+  
+  local needs_action=0
+
+  # 1. Check for local dirty state (uncommitted changes)
+  if [ -n "$(git status --porcelain)" ]; then
+    needs_action=1
+  else
+    # 2. Check remote status
+    git fetch origin "$BRANCH_NAME" --quiet >/dev/null 2>&1 || true
+
+    if [ -n "$TRACKING_REF" ]; then
+      local counts
+      counts=$(git rev-list --left-right --count HEAD...@{u} 2>/dev/null || echo "0 0")
+      local ahead=$(echo "$counts" | awk '{print $1}')
+      local behind=$(echo "$counts" | awk '{print $2}')
+
+      if [ "$ahead" -ne 0 ] || [ "$behind" -ne 0 ]; then
+        needs_action=1
+      fi
+    else
+      needs_action=1
+    fi
+  fi
+
+  if [ "$needs_action" -eq 0 ]; then
+    return
+  fi
+
+  # ---------------------------------------------------------
+  # ACTION: Changes detected, proceed
+  # ---------------------------------------------------------
+
+  echo
+  echo -e "${C_BLUE}Repo: ${C_YELLOW}${repo_dir}${C_NONE}"
+
   # 1) Pull
   OLD_HEAD=$(git rev-parse HEAD 2>/dev/null)
-  git fetch origin >/dev/null 2>&1 || true
+  
   if [ -n "$TRACKING_REF" ]; then
     if ! git pull --rebase --autostash origin "$BRANCH_NAME" >/dev/null 2>&1; then
       echo -e "${C_RED}  ! Pull failed. Resolve conflicts and re-run.${C_NONE}"
@@ -110,10 +126,16 @@ process_repo() {
       return
     fi
   fi
+  
   NEW_HEAD=$(git rev-parse HEAD 2>/dev/null)
   if [ "$OLD_HEAD" != "$NEW_HEAD" ]; then
     echo -e "${C_BLUE}1) Pull:${C_GREEN} ↓ Changes pulled:${C_NONE}"
     git log --pretty=format:"      %C(yellow)%h%C(reset) - %s %C(cyan)(%an, %ar)%C(reset)" "$OLD_HEAD".."$NEW_HEAD"
+    echo ""
+    # --- ADDED: Show brief stat of updated files ---
+    echo -e "${C_BLUE}      Files updated:${C_NONE}"
+    git diff --stat "$OLD_HEAD".."$NEW_HEAD" | sed "s/.*/      &/"
+    # -----------------------------------------------
   else
     echo -e "${C_BLUE}1) Pull:${C_GREEN} ✓ Up-to-date with remote.${C_NONE}"
   fi
@@ -122,6 +144,7 @@ process_repo() {
   git add -A
   if ! git diff --staged --quiet; then
     echo -e "${C_BLUE}2) Stage:${C_GREEN} Staged diff:${C_NONE}"
+    # This already shows the files briefly via --stat
     git diff --staged --stat | sed "s/.*/   ${C_RED}&${C_NONE}/"
   else
     echo -e "${C_BLUE}2) Stage:${C_GREEN} ✓ Nothing to stage.${C_NONE}"
@@ -167,7 +190,7 @@ process_repo() {
   fi
 }
 
-# ---- Build repo list without 'mapfile' ----
+# ---- Build repo list ----
 all_git_dirs=()
 for root in "${ROOTS[@]}"; do
   [ -d "$root" ] || continue
