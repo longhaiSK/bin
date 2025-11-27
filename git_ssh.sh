@@ -1,36 +1,121 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# --- Find the current remote URL for 'origin' ---
-# Filters 'git remote -v' to get the fetch URL.
-https_url=$(git remote -v | grep '^origin' | grep '(fetch)' | awk '{print $2}')
+# Use nounset (exit on unset vars) but NOT 'set -e' 
+# because we don't want one failed repo to stop the loop.
+set -u
 
-# --- Check if the URL is a GitHub HTTPS URL ---
-if [[ -n "$https_url" && "$https_url" == https://github.com/* ]]; then
-  # It's a GitHub HTTPS URL; proceed with conversion.
-  echo "Found GitHub HTTPS remote: $https_url"
-
-  # --- Convert the URL from HTTPS to SSH ---
-  # Remove the 'https://github.com/' prefix to get the 'user/repo' part.
-  user_repo=$(echo "$https_url" | sed 's|https://github.com/||')
-  # Construct the new SSH URL.
-  ssh_url="git@github.com:$user_repo"
-
-  # --- Execute the command to update the remote ---
-  echo "Switching 'origin' to use SSH..."
-  git remote set-url origin "$ssh_url"
-  
-  # --- Verify the change ---
-  echo "" # Add a newline for clarity
-  echo "Success! Remote 'origin' is now set to:"
-  # Show the new remote URLs to confirm the change was successful.
-  git remote -v
-
-elif [[ -n "$https_url" ]]; then
-  # A URL was found, but it wasn't a GitHub HTTPS URL.
-  echo "Remote 'origin' is not using a GitHub HTTPS URL."
-  echo "Current URL: $https_url"
+# ---------- Configuration ----------
+# Auto-detect folder name (GitHub vs Github vs github)
+if [ -d "${HOME}/GitHub" ]; then
+    SEARCH_ROOT="${HOME}/GitHub"
+elif [ -d "${HOME}/Github" ]; then
+    SEARCH_ROOT="${HOME}/Github"
+elif [ -d "${HOME}/github" ]; then
+    SEARCH_ROOT="${HOME}/github"
 else
-  # No fetch URL found for 'origin'.
-  echo "Error: Could not find the fetch URL for the 'origin' remote."
-  echo "Please ensure you are inside a Git repository."
+    SEARCH_ROOT="${HOME}/Github" # Fallback
 fi
+
+COMMIT_MSG="${1:-git_sync_batch from $(hostname)}"
+
+# ---------- Colors ----------
+C_BLUE=$'\033[0;34m'
+C_GREEN=$'\033[32m'
+C_YELLOW=$'\033[0;33m'
+C_RED=$'\033[0;31m'
+C_NONE=$'\033[0m'
+C_CYAN=$'\033[0;36m'
+# -----------------------------
+
+echo -e "${C_GREEN}=== Starting Batch Git Sync in: ${SEARCH_ROOT} ===${C_NONE}"
+
+# Function to process a single repository
+process_repo() {
+    local repo_path="$1"
+    
+    # Go to directory
+    cd "$repo_path" || return
+
+    echo -e "\n${C_CYAN}-------------------------------------------------------${C_NONE}"
+    echo -e "${C_CYAN}Repo: ${C_YELLOW}${repo_path}${C_NONE}"
+    
+    # Check if inside git tree (sanity check)
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo -e "${C_RED}Error: Not a git repository.${C_NONE}"
+        return
+    fi
+
+    # 0) Auto-convert HTTPS to SSH (Github only)
+    # Using 'git remote get-url' is cleaner than parsing 'git remote -v'
+    local remote_url
+    remote_url=$(git remote get-url origin 2>/dev/null || true)
+
+    if [[ "$remote_url" == https://github.com/* ]]; then
+        echo -e "${C_BLUE}0) Converting HTTPS to SSH...${C_NONE}"
+        
+        # Remove 'https://github.com/' prefix
+        local user_repo="${remote_url#https://github.com/}"
+        local ssh_url="git@github.com:${user_repo}"
+        
+        echo -e "   Current: $remote_url"
+        echo -e "   New:     $ssh_url"
+        
+        if git remote set-url origin "$ssh_url"; then
+            echo -e "${C_GREEN}   ✓ Remote updated to SSH.${C_NONE}"
+        else
+            echo -e "${C_RED}   ! Failed to update remote.${C_NONE}"
+        fi
+    fi
+
+    # Determine branch
+    local BRANCH_NAME
+    BRANCH_NAME=$(git symbolic-ref --quiet --short HEAD 2>/dev/null)
+    
+    if [ -z "$BRANCH_NAME" ]; then
+        echo -e "${C_RED}Error: Detached HEAD or no branch found.${C_NONE}"
+        return
+    fi
+
+    # 1) Pull
+    echo -e "${C_BLUE}1) Pulling changes from origin/${BRANCH_NAME}...${C_NONE}"
+    if ! git pull --rebase --autostash origin "$BRANCH_NAME"; then
+        echo -e "${C_RED}Pull failed (Conflict?). Skipping rest of sync for this repo.${C_NONE}"
+        return
+    fi
+
+    # 2) Stage
+    echo -e "${C_BLUE}2) Staging all changes...${C_NONE}"
+    git add -A
+
+    # 3) Commit
+    if git diff --staged --quiet; then
+        echo -e "${C_BLUE}3) Commit: ${C_GREEN}Nothing to commit.${C_NONE}"
+    else
+        echo -e "${C_BLUE}3) Committing with message: \"${COMMIT_MSG}\"${C_NONE}"
+        if ! git commit -m "$COMMIT_MSG"; then
+             echo -e "${C_RED}Commit failed.${C_NONE}"
+             return
+        fi
+    fi
+
+    # 4) Push
+    echo -e "${C_BLUE}4) Pushing to origin/${BRANCH_NAME}...${C_NONE}"
+    if ! git push origin "$BRANCH_NAME"; then
+        echo -e "${C_RED}Push failed. Check connection/permissions.${C_NONE}"
+        return
+    fi
+    
+    echo -e "${C_GREEN}✓ Sync completed for $(basename "$repo_path")${C_NONE}"
+}
+
+# --- Main Loop ---
+# Find all directories containing .git, strip the /.git suffix, and process
+find "$SEARCH_ROOT" -type d -name ".git" -prune | sort | while read -r gitdir; do
+    # Get the parent directory (the actual repo root)
+    repo_root=$(dirname "$gitdir")
+    
+    # Run in a subshell so 'cd' doesn't affect the main loop
+    (process_repo "$repo_root")
+done
+
+echo -e "\n${C_GREEN}=== All Repositories Processed ===${C_NONE}"
