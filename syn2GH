@@ -45,6 +45,28 @@ process_repo() {
         return
     fi
 
+    # 0) Auto-convert HTTPS to SSH (Github only)
+    # Using 'git remote get-url' is cleaner than parsing 'git remote -v'
+    local remote_url
+    remote_url=$(git remote get-url origin 2>/dev/null || true)
+
+    if [[ "$remote_url" == https://github.com/* ]]; then
+        echo -e "${C_BLUE}0) Converting HTTPS to SSH...${C_NONE}"
+        
+        # Remove 'https://github.com/' prefix
+        local user_repo="${remote_url#https://github.com/}"
+        local ssh_url="git@github.com:${user_repo}"
+        
+        echo -e "   Current: $remote_url"
+        echo -e "   New:     $ssh_url"
+        
+        if git remote set-url origin "$ssh_url"; then
+            echo -e "${C_GREEN}   ✓ Remote updated to SSH.${C_NONE}"
+        else
+            echo -e "${C_RED}   ! Failed to update remote.${C_NONE}"
+        fi
+    fi
+
     # Determine branch
     local BRANCH_NAME
     BRANCH_NAME=$(git symbolic-ref --quiet --short HEAD 2>/dev/null)
