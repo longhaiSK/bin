@@ -128,9 +128,7 @@ process_repo() {
     is_dirty=1
   fi
 
-  # We need to recalculate 'ahead' if we just pulled, 
-  # but strictly speaking, if we pulled successfully, ahead is still relative to what we had or just merged.
-  # Let's re-check ahead count against the updated ref to be sure.
+  # Recalculate ahead just in case pull happened
   if [ -n "$TRACKING_REF" ]; then
     ahead=$(git rev-list --count @{u}..HEAD 2>/dev/null || echo "0")
   fi
@@ -140,8 +138,15 @@ process_repo() {
     return
   fi
 
-  # If we are here, we have local changes (dirty or unpushed commits)
+  # If we are here, we have local changes
   echo -e "${C_BLUE}  Local: ${C_YELLOW} Changes detected. Processing...${C_NONE}"
+
+  # --- SHOW LOCAL STATS ---
+  # Compare current working dir (including dirty files) vs the Remote Tracking Branch
+  local compare_ref="${TRACKING_REF:-origin/$BRANCH_NAME}"
+  git diff --stat "$compare_ref" 2>/dev/null | sed "s/.*/      &/"
+  echo ""
+  # ------------------------
 
   # Stage & Commit if dirty
   if [ "$is_dirty" -eq 1 ]; then
@@ -158,7 +163,6 @@ process_repo() {
   fi
 
   # Push
-  # Capture what we are about to push for the log display
   if [ -n "$TRACKING_REF" ]; then
     TO_PUSH=$(git log --pretty=format:"      %C(yellow)%h%C(reset) - %s %C(cyan)(%ar)%C(reset)" "${TRACKING_REF}"..HEAD 2>/dev/null)
   else
@@ -172,7 +176,6 @@ process_repo() {
     if [ -n "$TO_PUSH" ]; then
       echo -e "$TO_PUSH"
     else
-      # Fallback if variable was empty but push happened (rare)
       echo -e "      (New empty commit or branch setup)"
     fi
   else
