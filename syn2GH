@@ -4,6 +4,11 @@
 # because we don't want one failed repo to stop the loop.
 set -u
 
+# ---------- PATH Configuration (Critical for launchd/cron) ----------
+# launchd runs with a minimal PATH. We must explicitly add Homebrew paths
+# so that 'git-lfs' and updated 'git' versions are found.
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+
 # ---------- Configuration ----------
 # Auto-detect folder name (GitHub vs Github vs github)
 if [ -d "${HOME}/GitHub" ]; then
