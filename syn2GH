@@ -36,6 +36,7 @@ C_BLUE=$'\033[0;34m'
 C_GREEN=$'\033[32m'
 C_YELLOW=$'\033[0;33m'
 C_RED=$'\033[0;31m'
+C_CYAN=$'\033[0;36m'
 C_NONE=$'\033[0m'
 
 # ---- Commit message ----
@@ -45,9 +46,9 @@ else
   COMMIT_MSG="syn2GH from $(hostname)"
 fi
 
-# ---- Run header ----
+# ---- Run header (HIGHLIGHTED RED) ----
 START_TS="$(TZ='America/Regina' date '+%Y-%m-%d %H:%M:%S %Z')"
-echo -e "${C_BLUE}syn2GH start:${C_NONE} ${C_YELLOW}${START_TS}${C_NONE} on ${C_GREEN}$(hostname)${C_NONE}"
+echo -e "${C_RED}syn2GH start:${C_NONE} ${C_YELLOW}${START_TS}${C_NONE} on ${C_GREEN}$(hostname)${C_NONE}"
 
 errors=()
 
@@ -109,7 +110,8 @@ process_repo() {
   # ACTION
   # ---------------------------------------------------------
 
-  echo
+  # Print Separator and Repo Name
+  echo -e "\n${C_CYAN}-------------------------------------------------------${C_NONE}"
   echo -e "${C_BLUE}Repo: ${C_YELLOW}${repo_dir}${C_NONE}"
 
   # 1) Pull
