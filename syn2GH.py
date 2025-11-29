@@ -83,7 +83,8 @@ def get_tracking_ref(repo_dir, branch_name):
             capture_output=True,
             silent=True
         )
-        if 'fatal:' in tracking_ref or not tracking_ref:
+        # Check for error outputs or empty string
+        if 'fatal:' in tracking_ref or 'unknown revision' in tracking_ref or not tracking_ref:
              return None
         return tracking_ref
     except RuntimeError:
@@ -164,7 +165,8 @@ def process_repo(repo_dir, commit_msg, errors):
     pull_success = True
     
     # Only pull if tracking_ref is confirmed to exist
-    if tracking_ref: 
+    # AND, for safety, only if the tracking ref points to the same branch name on the remote
+    if tracking_ref and tracking_ref == f'{REMOTE}/{branch_name}':
         try:
             print(f"{COLORS['BLUE']}1) Pull: {COLORS['NONE']}", end="")
             run_git_command(['git', 'pull', '--rebase', '--autostash', REMOTE, branch_name], cwd=repo_dir, check=True)
@@ -174,8 +176,8 @@ def process_repo(repo_dir, commit_msg, errors):
             errors.append(f"{repo_str}: pull failed on branch {branch_name}")
             pull_success = False
     else:
-        # Skip pull for new, untracked branch
-        colored_print(f"1) Pull: {COLORS['GREEN']}✓ Skipping pull (New Branch).", 'BLUE')
+        # Skip pull for new, untracked, or mis-tracked branches
+        colored_print(f"1) Pull: {COLORS['GREEN']}✓ Skipping pull (New/Untracked Branch).", 'BLUE')
 
     if pull_success:
         try:
@@ -243,7 +245,7 @@ def process_repo(repo_dir, commit_msg, errors):
         
         # Scenario A: New Branch (no tracking ref) OR Scenario B: Existing commits
         if not tracking_ref:
-            # New branch or branch with broken tracking: Must push and set upstream
+            # New branch or branch with broken tracking: Must push and set upstream to same branch name
             should_push = True
             push_options = ['--set-upstream', REMOTE, branch_name]
             ref_to_check = 'HEAD' # Check from the beginning of history
