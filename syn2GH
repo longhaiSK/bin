@@ -48,7 +48,7 @@ fi
 
 # ---- Run header (HIGHLIGHTED RED) ----
 START_TS="$(TZ='America/Regina' date '+%Y-%m-%d %H:%M:%S %Z')"
-echo -e "${C_RED}syn2GH start:${C_NONE} ${C_YELLOW}${START_TS}${C_NONE} on ${C_GREEN}$(hostname)${C_NONE}"
+echo -e "${C_RED}syn2GH start: ${START_TS} on $(hostname)${C_NONE}"
 
 errors=()
 
