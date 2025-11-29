@@ -11,6 +11,9 @@ REPO_ROOTS = [Path(os.environ.get('githubroot', os.path.expanduser('~/Github')))
 REMOTE = os.environ.get('REMOTE', 'origin')
 GIT_SSH_COMMAND = os.environ.get('GIT_SSH_COMMAND', 'ssh')
 
+# --- New: Define core branches that require full pull/sync ---
+CORE_BRANCHES = ['main', 'master', 'develop']
+
 # Exclude heavy/noisy directories
 EXCLUDE_REGEX = re.compile(r'(/node_modules/|/\.venv/|/\.cargo/)')
 
@@ -32,7 +35,6 @@ def run_git_command(command, cwd, check=True, capture_output=False, silent=False
     """Wrapper for running Git commands."""
     try:
         if not silent and not capture_output:
-            # Run without capturing, allowing output to stream directly
             return subprocess.run(
                 command,
                 cwd=cwd,
@@ -41,7 +43,6 @@ def run_git_command(command, cwd, check=True, capture_output=False, silent=False
                 env=dict(os.environ, GIT_SSH_COMMAND=GIT_SSH_COMMAND)
             )
         else:
-            # Run capturing output
             result = subprocess.run(
                 command,
                 cwd=cwd,
@@ -83,7 +84,6 @@ def get_tracking_ref(repo_dir, branch_name):
             capture_output=True,
             silent=True
         )
-        # Check for error outputs or empty string
         if 'fatal:' in tracking_ref or 'unknown revision' in tracking_ref or not tracking_ref:
              return None
         return tracking_ref
@@ -92,8 +92,7 @@ def get_tracking_ref(repo_dir, branch_name):
 
 def process_repo(repo_dir, commit_msg, errors):
     """
-    Performs the pull-stage-commit-push sequence for a single repository,
-    using the currently checked out branch, and pushes new branches.
+    Performs the synchronization based on whether the branch is a core branch or a feature branch.
     """
     
     repo_str = str(repo_dir)
@@ -110,6 +109,9 @@ def process_repo(repo_dir, commit_msg, errors):
     except (subprocess.CalledProcessError, RuntimeError):
         return 
 
+    # Determine sync mode
+    is_core_branch = branch_name in CORE_BRANCHES
+    
     # 2. Upstream Tracking Setup Check
     tracking_ref = get_tracking_ref(repo_dir, branch_name)
 
@@ -117,18 +119,17 @@ def process_repo(repo_dir, commit_msg, errors):
     needs_action = False
     
     try:
-        # Check for local dirty state
+        # Check for local dirty state (always triggers action)
         if run_git_command(['git', 'status', '--porcelain'], cwd=repo_dir, capture_output=True, silent=True):
             needs_action = True
         
         # Check remote status (Fetch quietly)
         run_git_command(['git', 'fetch', REMOTE, branch_name, '--quiet'], cwd=repo_dir, check=False, silent=True)
         
-        # If there's no tracking ref, we *must* assume action is needed (to commit/push the new branch)
-        if not tracking_ref:
+        # Check for unpushed/unpulled commits
+        if not tracking_ref or is_core_branch:
             needs_action = True
         else:
-            # Check for ahead/behind counts
             counts_str = run_git_command(
                 ['git', 'rev-list', '--left-right', '--count', f'HEAD...{tracking_ref}'],
                 cwd=repo_dir,
@@ -161,14 +162,13 @@ def process_repo(repo_dir, commit_msg, errors):
     except RuntimeError:
         old_head = "INITIAL_COMMIT" 
 
-    # 1) Pull (Rebase/Autostash) - STRICTLY CONDITIONAL PULL
+    # 1) Pull (Conditional)
     pull_success = True
     
-    # Only pull if tracking_ref is confirmed to exist
-    # AND, for safety, only if the tracking ref points to the same branch name on the remote
-    if tracking_ref and tracking_ref == f'{REMOTE}/{branch_name}':
+    if is_core_branch and tracking_ref: 
+        # CORE BRANCH SYNC: Pull with rebase/autostash
         try:
-            print(f"{COLORS['BLUE']}1) Pull: {COLORS['NONE']}", end="")
+            print(f"{COLORS['BLUE']}1) Pull (CORE): {COLORS['NONE']}", end="")
             run_git_command(['git', 'pull', '--rebase', '--autostash', REMOTE, branch_name], cwd=repo_dir, check=True)
             
         except RuntimeError:
@@ -176,8 +176,8 @@ def process_repo(repo_dir, commit_msg, errors):
             errors.append(f"{repo_str}: pull failed on branch {branch_name}")
             pull_success = False
     else:
-        # Skip pull for new, untracked, or mis-tracked branches
-        colored_print(f"1) Pull: {COLORS['GREEN']}✓ Skipping pull (New/Untracked Branch).", 'BLUE')
+        # FEATURE BRANCH BACKUP: Skip pull entirely to prevent unwanted merges/rebases
+        colored_print(f"1) Pull (FEATURE): {COLORS['GREEN']}✓ Skipping pull for safe backup.", 'BLUE')
 
     if pull_success:
         try:
@@ -185,7 +185,7 @@ def process_repo(repo_dir, commit_msg, errors):
         except RuntimeError:
             new_head = None
 
-        if old_head != new_head and old_head != "INITIAL_COMMIT" and tracking_ref: 
+        if old_head != new_head and old_head != "INITIAL_COMMIT" and tracking_ref and is_core_branch: 
             colored_print(f"1) Pull: {COLORS['GREEN']}↓ Changes pulled:", 'BLUE')
             log_output = run_git_command(
                 ['git', 'log', f'{old_head}..{new_head}', '--pretty=format:      %C(yellow)%h%C(reset) - %s %C(cyan)(%an, %ar)%C(reset)'],
@@ -202,11 +202,11 @@ def process_repo(repo_dir, commit_msg, errors):
                 silent=True
             )
             print('\n'.join("      " + line for line in diff_stat.splitlines()))
-        elif tracking_ref:
+        elif tracking_ref and is_core_branch:
             colored_print(f"1) Pull: {COLORS['GREEN']}✓ Up-to-date.", 'BLUE')
 
         # 2) Stage
-        git_add_output = run_git_command(['git', 'add', '-A'], cwd=repo_dir, check=True, silent=True)
+        run_git_command(['git', 'add', '-A'], cwd=repo_dir, check=True, silent=True)
         staged_changes = run_git_command(['git', 'diff', '--staged', '--quiet'], cwd=repo_dir, check=False, capture_output=True, silent=True)
 
         if not staged_changes:
@@ -243,15 +243,14 @@ def process_repo(repo_dir, commit_msg, errors):
         should_push = False
         push_options = [REMOTE, branch_name] # Default push command
         
-        # Scenario A: New Branch (no tracking ref) OR Scenario B: Existing commits
+        # Scenario A: New Branch (no tracking ref)
         if not tracking_ref:
-            # New branch or branch with broken tracking: Must push and set upstream to same branch name
             should_push = True
+            # Set upstream to same branch name (e.g., origin/trySyn2GH.py)
             push_options = ['--set-upstream', REMOTE, branch_name]
-            ref_to_check = 'HEAD' # Check from the beginning of history
             
         else:
-            # Existing branch: Check for commits to push
+            # Scenario B: Check for commits to push
             ref_to_check = tracking_ref
             try:
                 commits_to_push = run_git_command(
@@ -268,11 +267,9 @@ def process_repo(repo_dir, commit_msg, errors):
 
         if should_push:
             try:
-                # Construct the full command: git push [options] remote branch_name
                 push_command = ['git', 'push'] + push_options
                 run_git_command(push_command, cwd=repo_dir, check=True, silent=True)
                 
-                # If we just set upstream, update the tracking_ref for future runs
                 if not tracking_ref:
                      tracking_ref = f"{REMOTE}/{branch_name}"
                      
