@@ -1,5 +1,6 @@
 #!/bin/zsh
 
+
 # Use nounset on only after we set sane defaults
 set -e -o pipefail
 
