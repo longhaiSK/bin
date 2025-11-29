@@ -1,5 +1,4 @@
 #!/Users/lol553/Github/bin/.venv/bin/python
-
 import os
 import subprocess
 import sys
@@ -54,7 +53,9 @@ def run_git_command(command, cwd, check=True, capture_output=False, silent=False
             return result.stdout.strip()
     except subprocess.CalledProcessError as e:
         if check:
-            raise RuntimeError(f"Command failed: {' '.join(command)}\nStderr: {e.stderr.strip()}")
+            # This is the corrected error handling to avoid the AttributeError
+            stderr_output = e.stderr.strip() if e.stderr else 'No error message.'
+            raise RuntimeError(f"Command failed: {' '.join(command)}\nStderr: {stderr_output}")
         return None 
 
 def find_git_repos(root_dirs, exclude_regex):
@@ -140,7 +141,7 @@ def process_repo(repo_dir, commit_msg, errors):
                 if ahead != 0 or behind != 0:
                     needs_action = True
             except ValueError:
-                needs_action = True # Assume action is needed if parsing fails
+                needs_action = True 
 
     except RuntimeError:
         needs_action = True 
@@ -159,9 +160,9 @@ def process_repo(repo_dir, commit_msg, errors):
     except RuntimeError:
         old_head = "INITIAL_COMMIT" 
 
-    # 1) Pull (Rebase/Autostash)
+    # 1) Pull (Rebase/Autostash) - FIX APPLIED HERE: ONLY PULL IF TRACKING_REF EXISTS
     pull_success = True
-    if tracking_ref: # Only attempt pull if a tracking branch exists
+    if tracking_ref: 
         try:
             print(f"{COLORS['BLUE']}1) Pull: {COLORS['NONE']}", end="")
             run_git_command(['git', 'pull', '--rebase', '--autostash', REMOTE, branch_name], cwd=repo_dir, check=True)
@@ -169,6 +170,8 @@ def process_repo(repo_dir, commit_msg, errors):
             colored_print(f"\n  ! Pull failed. Resolve conflicts manually.", 'RED')
             errors.append(f"{repo_str}: pull failed on branch {branch_name}")
             pull_success = False
+    else:
+        colored_print(f"1) Pull: {COLORS['GREEN']}✓ Skipping pull (New Branch).", 'BLUE')
 
     if pull_success:
         try:
@@ -176,7 +179,7 @@ def process_repo(repo_dir, commit_msg, errors):
         except RuntimeError:
             new_head = None
 
-        if old_head != new_head and old_head != "INITIAL_COMMIT":
+        if old_head != new_head and old_head != "INITIAL_COMMIT" and tracking_ref: # Only show pull stats if a pull actually happened
             colored_print(f"1) Pull: {COLORS['GREEN']}↓ Changes pulled:", 'BLUE')
             log_output = run_git_command(
                 ['git', 'log', f'{old_head}..{new_head}', '--pretty=format:      %C(yellow)%h%C(reset) - %s %C(cyan)(%an, %ar)%C(reset)'],
@@ -193,7 +196,7 @@ def process_repo(repo_dir, commit_msg, errors):
                 silent=True
             )
             print('\n'.join("      " + line for line in diff_stat.splitlines()))
-        else:
+        elif tracking_ref:
             colored_print(f"1) Pull: {COLORS['GREEN']}✓ Up-to-date.", 'BLUE')
 
         # 2) Stage
