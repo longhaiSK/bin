@@ -32,7 +32,9 @@ C_NONE=$'\033[0m'
 C_CYAN=$'\033[0;36m'
 # -----------------------------
 
+echo -e "\n${C_RED}-------------------------------------------------------${C_NONE}"
 echo -e "${C_RED}=== Starting Batch Git Sync in: ${SEARCH_ROOT} at $(date '+%Y-%m-%d %H:%M:%S') ===${C_NONE}"
+echo -e "\n${C_RED}-------------------------------------------------------${C_NONE}"
 
 # Function to process a single repository
 process_repo() {
