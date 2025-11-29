@@ -1,6 +1,6 @@
 #!/bin/zsh
 
-# Turn nounset on only after we set sane defaults
+# Use nounset on only after we set sane defaults
 set -e -o pipefail
 
 # PATH bootstrap (robust)
@@ -64,16 +64,9 @@ process_repo() {
   if [ -z "$BRANCH_NAME" ]; then return; fi
   if ! git remote get-url origin >/dev/null 2>&1; then return; fi
 
-  # Upstream tracking setup
+  # Upstream tracking check
+  # We only pull if the branch already has a remote counterpart set up.
   TRACKING_REF=$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || true)
-  if [ -z "$TRACKING_REF" ]; then
-    DEFAULT_REMOTE_BRANCH=$(git remote show origin 2>/dev/null | awk '/HEAD branch/ {print $NF}')
-    if [ -n "$DEFAULT_REMOTE_BRANCH" ]; then
-      if git branch --set-upstream-to="origin/${DEFAULT_REMOTE_BRANCH}" "$BRANCH_NAME" >/dev/null 2>&1; then
-        TRACKING_REF="origin/${DEFAULT_REMOTE_BRANCH}"
-      fi
-    fi
-  fi
 
   # ---------------------------------------------------------
   # CHECK STATUS: Speed check
@@ -97,6 +90,7 @@ process_repo() {
         needs_action=1
       fi
     else
+      # If no tracking ref, we still need action if there are local commits to push
       needs_action=1
     fi
   fi
@@ -110,29 +104,34 @@ process_repo() {
   # ACTION
   # ---------------------------------------------------------
 
-  # Print Separator and Repo Name
+  # Print Separator (Cyan) and Repo Name (Blue)
   echo -e "\n${C_CYAN}-------------------------------------------------------${C_NONE}"
   echo -e "${C_BLUE}Repo: ${C_YELLOW}${repo_dir}${C_NONE}"
 
-  # 1) Pull
-  OLD_HEAD=$(git rev-parse HEAD 2>/dev/null)
+  # 1) Pull (Conditional)
   if [ -n "$TRACKING_REF" ]; then
+    echo -e "${C_BLUE}1) Pulling changes from origin/${BRANCH_NAME}...${C_NONE}"
+    OLD_HEAD=$(git rev-parse HEAD 2>/dev/null)
+    
+    # Use || true to prevent 'set -e' from exiting the entire script on merge conflict
     if ! git pull --rebase --autostash origin "$BRANCH_NAME" >/dev/null 2>&1; then
-      echo -e "${C_RED}  ! Pull failed. Resolve conflicts manually.${C_NONE}"
+      echo -e "${C_RED}  ! Pull failed (Conflict?). Resolve conflicts manually.${C_NONE}"
       errors+=("$repo_dir: pull failed")
       return
     fi
-  fi
-  NEW_HEAD=$(git rev-parse HEAD 2>/dev/null)
-  
-  if [ "$OLD_HEAD" != "$NEW_HEAD" ]; then
-    echo -e "${C_BLUE}1) Pull:${C_GREEN} ↓ Changes pulled:${C_NONE}"
-    git log --pretty=format:"      %C(yellow)%h%C(reset) - %s %C(cyan)(%an, %ar)%C(reset)" "$OLD_HEAD".."$NEW_HEAD"
-    echo ""
-    # Show file stats for the pull
-    git diff --stat "$OLD_HEAD".."$NEW_HEAD" | sed "s/.*/      &/"
+    NEW_HEAD=$(git rev-parse HEAD 2>/dev/null)
+    
+    if [ "$OLD_HEAD" != "$NEW_HEAD" ]; then
+      echo -e "${C_BLUE}1) Pull:${C_GREEN} ↓ Changes pulled:${C_NONE}"
+      git log --pretty=format:"      %C(yellow)%h%C(reset) - %s %C(cyan)(%an, %ar)%C(reset)" "$OLD_HEAD".."$NEW_HEAD"
+      echo ""
+      # Show file stats for the pull
+      git diff --stat "$OLD_HEAD".."$NEW_HEAD" | sed "s/.*/      &/"
+    else
+      echo -e "${C_BLUE}1) Pull:${C_GREEN} ✓ Up-to-date.${C_NONE}"
+    fi
   else
-    echo -e "${C_BLUE}1) Pull:${C_GREEN} ✓ Up-to-date.${C_NONE}"
+      echo -e "${C_BLUE}1) Pull: ${C_YELLOW}No upstream set. Skipping pull.${C_NONE}"
   fi
 
   # 2) Stage
@@ -147,7 +146,7 @@ process_repo() {
   if ! git diff --staged --quiet; then
     if git commit -m "$COMMIT_MSG" >/dev/null; then
       echo -e "${C_BLUE}3) Commit:${C_GREEN} ✓ Committed:${C_NONE}"
-      # Show the commit stat in Red as requested
+      # Show the commit stat
       git show --stat --oneline --no-color HEAD | sed "1d" | sed "s/^/      ${C_RED}/" | sed "s/$/${C_NONE}/"
     else
       echo -e "${C_BLUE}3) Commit:${C_RED} ! Failed.${C_NONE}"
@@ -162,11 +161,21 @@ process_repo() {
   if [ -n "$TRACKING_REF" ]; then
     TO_PUSH=$(git log --pretty=format:"%h" "${TRACKING_REF}"..HEAD 2>/dev/null)
   else
-    TO_PUSH=$(git log --pretty=format:"%h" "origin/$BRANCH_NAME"..HEAD 2>/dev/null)
+    # If no tracking ref, we check if there are any local commits to push
+    # This is a bit complex in a pull-first script, but for simplicity, we just check against origin/main or HEAD
+    # We rely on the implicit git push logic for new branches
+    TO_PUSH=$(git log --pretty=format:"%h" origin/$BRANCH_NAME..HEAD 2>/dev/null || true)
   fi
 
-  if [ -n "$TO_PUSH" ]; then
-    if git push origin "$BRANCH_NAME" >/dev/null 2>&1; then
+  if [ -n "$TO_PUSH" ] || [ -z "$TRACKING_REF" ]; then
+    # Use -u (or --set-upstream) if no tracking ref exists, otherwise standard push
+    if [ -z "$TRACKING_REF" ]; then
+        PUSH_CMD="git push -u origin $BRANCH_NAME"
+    else
+        PUSH_CMD="git push origin $BRANCH_NAME"
+    fi
+
+    if $PUSH_CMD >/dev/null 2>&1; then
       echo -e "${C_BLUE}4) Push:${C_GREEN} ✓ Pushed successfully.${C_NONE}"
     else
       echo -e "${C_BLUE}4) Push:${C_RED} ↑ Push FAILED.${C_NONE}"
@@ -199,7 +208,6 @@ if [ ${#raw_git_dirs[@]} -eq 0 ]; then
 fi
 
 # Zsh specific: Sort the array alphabetically (case-insensitive)
-# (oi) flag: o = order, i = case-insensitive
 sorted_git_dirs=("${(@oi)raw_git_dirs}")
 
 # ---- Process each repo ----
