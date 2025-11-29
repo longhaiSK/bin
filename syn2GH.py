@@ -53,7 +53,7 @@ def run_git_command(command, cwd, check=True, capture_output=False, silent=False
             return result.stdout.strip()
     except subprocess.CalledProcessError as e:
         if check:
-            # This is the corrected error handling to avoid the AttributeError
+            # Corrected error handling
             stderr_output = e.stderr.strip() if e.stderr else 'No error message.'
             raise RuntimeError(f"Command failed: {' '.join(command)}\nStderr: {stderr_output}")
         return None 
@@ -83,7 +83,7 @@ def get_tracking_ref(repo_dir, branch_name):
             capture_output=True,
             silent=True
         )
-        if 'fatal:' in tracking_ref:
+        if 'fatal:' in tracking_ref or not tracking_ref:
              return None
         return tracking_ref
     except RuntimeError:
@@ -160,17 +160,21 @@ def process_repo(repo_dir, commit_msg, errors):
     except RuntimeError:
         old_head = "INITIAL_COMMIT" 
 
-    # 1) Pull (Rebase/Autostash) - FIX APPLIED HERE: ONLY PULL IF TRACKING_REF EXISTS
+    # 1) Pull (Rebase/Autostash) - STRICTLY CONDITIONAL PULL
     pull_success = True
+    
+    # Only pull if tracking_ref is confirmed to exist
     if tracking_ref: 
         try:
             print(f"{COLORS['BLUE']}1) Pull: {COLORS['NONE']}", end="")
             run_git_command(['git', 'pull', '--rebase', '--autostash', REMOTE, branch_name], cwd=repo_dir, check=True)
+            
         except RuntimeError:
             colored_print(f"\n  ! Pull failed. Resolve conflicts manually.", 'RED')
             errors.append(f"{repo_str}: pull failed on branch {branch_name}")
             pull_success = False
     else:
+        # Skip pull for new, untracked branch
         colored_print(f"1) Pull: {COLORS['GREEN']}✓ Skipping pull (New Branch).", 'BLUE')
 
     if pull_success:
@@ -179,7 +183,7 @@ def process_repo(repo_dir, commit_msg, errors):
         except RuntimeError:
             new_head = None
 
-        if old_head != new_head and old_head != "INITIAL_COMMIT" and tracking_ref: # Only show pull stats if a pull actually happened
+        if old_head != new_head and old_head != "INITIAL_COMMIT" and tracking_ref: 
             colored_print(f"1) Pull: {COLORS['GREEN']}↓ Changes pulled:", 'BLUE')
             log_output = run_git_command(
                 ['git', 'log', f'{old_head}..{new_head}', '--pretty=format:      %C(yellow)%h%C(reset) - %s %C(cyan)(%an, %ar)%C(reset)'],
