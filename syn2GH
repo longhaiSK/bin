@@ -1,9 +1,10 @@
 #!/bin/zsh
 
-# Turn nounset on only after we set sane defaults
+# Use nounset on only after we set sane defaults
 set -e -o pipefail
 
-# PATH bootstrap (robust)
+# ---------- PATH Configuration (Critical for launchd/cron) ----------
+# Ensure Homebrew and standard paths are available
 for d in /opt/homebrew/bin /usr/local/bin; do
   [[ -d $d ]] && PATH="$d:$PATH"
 done
@@ -52,7 +53,7 @@ echo -e "${C_RED}syn2GH start: ${START_TS} on $(hostname)${C_NONE}"
 
 errors=()
 
-# --- NEW: Load all keys into the SSH agent for non-interactive use ---
+# --- Load all keys into the SSH agent for non-interactive use ---
 ssh-add -A 2>/dev/null || true
 # --------------------------------------------------------------------
 
@@ -71,7 +72,7 @@ process_repo() {
   if [ -z "$BRANCH_NAME" ]; then return; fi
   if ! git remote get-url origin >/dev/null 2>&1; then return; fi
 
-  # Upstream tracking check
+  # Upstream tracking check (We removed the dangerous auto-setting block)
   TRACKING_REF=$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || true)
 
 
@@ -97,6 +98,7 @@ process_repo() {
         needs_action=1
       fi
     else
+      # Needs action if no tracking ref (needs first push)
       needs_action=1
     fi
   fi
@@ -162,7 +164,7 @@ process_repo() {
     echo -e "${C_BLUE}3) Commit:${C_GREEN} ✓ Nothing to commit.${C_NONE}"
   fi
 
-  # 4) Push
+  # 4) Push (Diagnostic Mode Active)
   if [ -n "$TRACKING_REF" ]; then
     TO_PUSH=$(git log --pretty=format:"%h" "${TRACKING_REF}"..HEAD 2>/dev/null)
   else
@@ -170,17 +172,19 @@ process_repo() {
   fi
 
   if [ -n "$TO_PUSH" ] || [ -z "$TRACKING_REF" ]; then
-    # If no tracking ref, we use -u to set it (create the remote branch)
+    
     if [ -z "$TRACKING_REF" ]; then
         PUSH_CMD="git push -u origin $BRANCH_NAME"
     else
         PUSH_CMD="git push origin $BRANCH_NAME"
     fi
 
-    if $PUSH_CMD >/dev/null 2>&1; then
+    echo -e "${C_BLUE}4) Running push command: ${C_YELLOW}$PUSH_CMD${C_NONE}" 
+
+    if $PUSH_CMD; then # Silent output REMOVED here to capture the error
       echo -e "${C_BLUE}4) Push:${C_GREEN} ✓ Pushed successfully.${C_NONE}"
     else
-      echo -e "${C_BLUE}4) Push:${C_RED} ↑ Push FAILED.${C_NONE}"
+      echo -e "${C_RED}4) Push: ↑ PUSH FAILED! See detailed error above.${C_NONE}"
       errors+=("$repo_dir: push failed")
       return
     fi
@@ -214,5 +218,7 @@ sorted_git_dirs=("${(@oi)raw_git_dirs}")
 
 # ---- Process each repo ----
 for repo in "${sorted_git_dirs[@]}"; do
-  process_repo "$repo" 
+  if [[ -n "$repo" ]]; then 
+     process_repo "$repo" 
+  fi
 done
