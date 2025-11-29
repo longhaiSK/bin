@@ -1,6 +1,5 @@
 
 # Ignore 'secrets/' (added by script)
-
 # Ignore '*.pdf' (added by script)
-
 # Ignore 'cover.odt' (added by script)
+.venv
