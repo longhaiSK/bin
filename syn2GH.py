@@ -207,6 +207,7 @@ def process_repo(repo_dir, commit_msg, errors):
 
         # 2) Stage
         run_git_command(['git', 'add', '-A'], cwd=repo_dir, check=True, silent=True)
+        # Check if anything is currently staged
         staged_changes = run_git_command(['git', 'diff', '--staged', '--quiet'], cwd=repo_dir, check=False, capture_output=True, silent=True)
 
         if not staged_changes:
@@ -215,7 +216,21 @@ def process_repo(repo_dir, commit_msg, errors):
             colored_print(f"2) Stage: {COLORS['GREEN']}✓ Nothing to stage.", 'BLUE')
 
         # 3) Commit
-        if not staged_changes:
+        # --- FIX: Only commit if git diff --staged --quiet indicates changes (returns nothing/error) ---
+        # If staged_changes is empty (meaning there *are* staged changes), we proceed.
+        # If staged_changes is NOT empty (meaning no changes, returns 0), we skip.
+        
+        # We need to re-run the check as git add might have changed the status
+        try:
+            # This command returns an exit code: 0 if clean, 1 if changes
+            subprocess.run(['git', 'diff', '--staged', '--quiet'], cwd=repo_dir, check=True, capture_output=True)
+            # If check=True succeeds (exit code 0), it means NO changes are staged.
+            has_staged_changes = False
+        except subprocess.CalledProcessError:
+            # If check=True fails (exit code 1), it means there ARE staged changes.
+            has_staged_changes = True
+
+        if has_staged_changes:
             try:
                 run_git_command(['git', 'commit', '-m', commit_msg], cwd=repo_dir, check=True, silent=True)
                 colored_print(f"3) Commit: {COLORS['GREEN']}✓ Committed:", 'BLUE')
@@ -232,11 +247,13 @@ def process_repo(repo_dir, commit_msg, errors):
                     print(formatted_stat)
                 
             except RuntimeError:
+                # If commit fails (e.g., empty commit message, though unlikely here)
                 colored_print(f"3) Commit: {COLORS['RED']}! Failed.", 'BLUE')
                 errors.append(f"{repo_str}: commit failed on branch {branch_name}")
                 return
         else:
             colored_print(f"3) Commit: {COLORS['GREEN']}✓ Nothing to commit.", 'BLUE')
+            # If there's nothing to commit, we check if there are unpushed commits that need pushing.
 
         # 4) Push (Handles new branches and existing ones)
         
@@ -246,11 +263,10 @@ def process_repo(repo_dir, commit_msg, errors):
         # Scenario A: New Branch (no tracking ref)
         if not tracking_ref:
             should_push = True
-            # Set upstream to same branch name (e.g., origin/trySyn2GH.py)
             push_options = ['--set-upstream', REMOTE, branch_name]
             
         else:
-            # Scenario B: Check for commits to push
+            # Scenario B: Check for commits to push (local history ahead of remote)
             ref_to_check = tracking_ref
             try:
                 commits_to_push = run_git_command(
@@ -263,7 +279,8 @@ def process_repo(repo_dir, commit_msg, errors):
                 if commits_to_push:
                     should_push = True
             except RuntimeError:
-                should_push = True # Assume push needed if check fails
+                # If this log check fails (e.g., ref doesn't exist, though tracked), push anyway
+                should_push = True 
 
         if should_push:
             try:
