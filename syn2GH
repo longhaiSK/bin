@@ -1,10 +1,10 @@
 #!/bin/zsh
 
+
 # Use nounset on only after we set sane defaults
 set -e -o pipefail
 
-# ---------- PATH Configuration (Critical for launchd/cron) ----------
-# Ensure Homebrew and standard paths are available
+# PATH bootstrap (robust)
 for d in /opt/homebrew/bin /usr/local/bin; do
   [[ -d $d ]] && PATH="$d:$PATH"
 done
@@ -53,14 +53,7 @@ echo -e "${C_RED}syn2GH start: ${START_TS} on $(hostname)${C_NONE}"
 
 errors=()
 
-# --- Load all keys into the SSH agent for non-interactive use ---
-ssh-add -A 2>/dev/null || true
-# --------------------------------------------------------------------
-
 process_repo() {
-  # FIX: Check argument count to avoid 'parameter not set' error
-  if [ $# -eq 0 ]; then return; fi
-  
   local repo_dir="$1"
   
   # Go into directory silently first
@@ -72,9 +65,9 @@ process_repo() {
   if [ -z "$BRANCH_NAME" ]; then return; fi
   if ! git remote get-url origin >/dev/null 2>&1; then return; fi
 
-  # Upstream tracking check (We removed the dangerous auto-setting block)
+  # Upstream tracking check
+  # We only pull if the branch already has a remote counterpart set up.
   TRACKING_REF=$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || true)
-
 
   # ---------------------------------------------------------
   # CHECK STATUS: Speed check
@@ -98,7 +91,7 @@ process_repo() {
         needs_action=1
       fi
     else
-      # Needs action if no tracking ref (needs first push)
+      # If no tracking ref, we still need action if there are local commits to push
       needs_action=1
     fi
   fi
@@ -121,6 +114,7 @@ process_repo() {
     echo -e "${C_BLUE}1) Pulling changes from origin/${BRANCH_NAME}...${C_NONE}"
     OLD_HEAD=$(git rev-parse HEAD 2>/dev/null)
     
+    # Use || true to prevent 'set -e' from exiting the entire script on merge conflict
     if ! git pull --rebase --autostash origin "$BRANCH_NAME" >/dev/null 2>&1; then
       echo -e "${C_RED}  ! Pull failed (Conflict?). Resolve conflicts manually.${C_NONE}"
       errors+=("$repo_dir: pull failed")
@@ -164,27 +158,28 @@ process_repo() {
     echo -e "${C_BLUE}3) Commit:${C_GREEN} ✓ Nothing to commit.${C_NONE}"
   fi
 
-  # 4) Push (Diagnostic Mode Active)
+  # 4) Push
   if [ -n "$TRACKING_REF" ]; then
     TO_PUSH=$(git log --pretty=format:"%h" "${TRACKING_REF}"..HEAD 2>/dev/null)
   else
-    TO_PUSH=$(git log --pretty=format:"%h" "origin/$BRANCH_NAME"..HEAD 2>/dev/null)
+    # If no tracking ref, we check if there are any local commits to push
+    # This is a bit complex in a pull-first script, but for simplicity, we just check against origin/main or HEAD
+    # We rely on the implicit git push logic for new branches
+    TO_PUSH=$(git log --pretty=format:"%h" origin/$BRANCH_NAME..HEAD 2>/dev/null || true)
   fi
 
   if [ -n "$TO_PUSH" ] || [ -z "$TRACKING_REF" ]; then
-    
+    # Use -u (or --set-upstream) if no tracking ref exists, otherwise standard push
     if [ -z "$TRACKING_REF" ]; then
         PUSH_CMD="git push -u origin $BRANCH_NAME"
     else
         PUSH_CMD="git push origin $BRANCH_NAME"
     fi
 
-    echo -e "${C_BLUE}4) Running push command: ${C_YELLOW}$PUSH_CMD${C_NONE}" 
-
-    if $PUSH_CMD; then # Silent output REMOVED here to capture the error
+    if $PUSH_CMD >/dev/null 2>&1; then
       echo -e "${C_BLUE}4) Push:${C_GREEN} ✓ Pushed successfully.${C_NONE}"
     else
-      echo -e "${C_RED}4) Push: ↑ PUSH FAILED! See detailed error above.${C_NONE}"
+      echo -e "${C_BLUE}4) Push:${C_RED} ↑ Push FAILED.${C_NONE}"
       errors+=("$repo_dir: push failed")
       return
     fi
@@ -218,7 +213,5 @@ sorted_git_dirs=("${(@oi)raw_git_dirs}")
 
 # ---- Process each repo ----
 for repo in "${sorted_git_dirs[@]}"; do
-  if [[ -n "$repo" ]]; then 
-     process_repo "$repo" 
-  fi
+  process_repo "$repo"
 done

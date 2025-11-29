@@ -1,13 +1,6 @@
 #!/usr/bin/env python3
-r"""
-sanitize_filenames.py
 
-Recursively sanitize filenames for Windows compatibility by:
-- Replacing illegal characters  < > : " / \ | ? *  with '-'
-- Trimming trailing spaces and dots
-- Avoiding Windows reserved base names (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
-- Resolving collisions by appending -2, -3, ...
-"""
+
 
 import argparse
 import os
