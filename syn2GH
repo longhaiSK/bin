@@ -51,10 +51,10 @@ def run_git_command(command, cwd, check=True, capture_output=False, silent=False
                 text=True,
                 env=dict(os.environ, GIT_SSH_COMMAND=GIT_SSH_COMMAND)
             )
-            return result.stdout.strip()
+            # When capturing, combine stdout and stderr for full Git messages
+            return result.stdout.strip() + '\n' + result.stderr.strip()
     except subprocess.CalledProcessError as e:
         if check:
-            # Corrected error handling
             stderr_output = e.stderr.strip() if e.stderr else 'No error message.'
             raise RuntimeError(f"Command failed: {' '.join(command)}\nStderr: {stderr_output}")
         return None 
@@ -116,20 +116,29 @@ def process_repo(repo_dir, commit_msg, errors):
     tracking_ref = get_tracking_ref(repo_dir, branch_name)
 
     # 3. Check Status (Speed optimization)
-    needs_action = False
     
+    # Initialize state variables
+    has_local_changes = False
+    is_ahead = False
+    is_behind = False
+    fetch_output = "" # Variable to store fetch message
+
     try:
-        # Check for local dirty state (always triggers action)
+        # A) Check for local dirty state (uncommitted changes)
         if run_git_command(['git', 'status', '--porcelain'], cwd=repo_dir, capture_output=True, silent=True):
-            needs_action = True
+            has_local_changes = True
         
-        # Check remote status (Fetch quietly)
-        run_git_command(['git', 'fetch', REMOTE, branch_name, '--quiet'], cwd=repo_dir, check=False, silent=True)
-        
-        # Check for unpushed/unpulled commits
-        if not tracking_ref or is_core_branch:
-            needs_action = True
-        else:
+        # B) Check remote status (Fetch and capture output)
+        try:
+            # Capture output from git fetch
+            fetch_output = run_git_command(['git', 'fetch', REMOTE, branch_name], cwd=repo_dir, check=False, capture_output=True, silent=True)
+            # Clean up the captured output
+            fetch_output = '\n'.join([line for line in fetch_output.splitlines() if line.strip()])
+        except Exception:
+             pass # Fetch failures are ignored here, checked later
+
+        # C) Check for commits ahead/behind (only needed if tracked)
+        if tracking_ref:
             counts_str = run_git_command(
                 ['git', 'rev-list', '--left-right', '--count', f'HEAD...{tracking_ref}'],
                 cwd=repo_dir,
@@ -140,21 +149,37 @@ def process_repo(repo_dir, commit_msg, errors):
             
             try:
                 ahead, behind = map(int, counts_str.split())
-                if ahead != 0 or behind != 0:
-                    needs_action = True
+                if ahead > 0:
+                    is_ahead = True
+                if behind > 0:
+                    is_behind = True
             except ValueError:
-                needs_action = True 
+                is_ahead = True 
 
     except RuntimeError:
-        needs_action = True 
+        pass 
 
-    if not needs_action:
-        return 
+    # Determine if action is truly needed
+    if has_local_changes:
+        needs_action = True
+    elif not tracking_ref and run_git_command(['git', 'log', f'{REMOTE}/{branch_name}..HEAD'], cwd=repo_dir, check=False, capture_output=True, silent=True):
+        needs_action = True
+    elif is_core_branch and (is_ahead or is_behind):
+        needs_action = True
+    elif not is_core_branch and is_ahead:
+        needs_action = True
+    else:
+        # *** REPO IS CLEAN AND SYNCHRONIZED: SILENT EXIT ***
+        return
 
     # --- ACTION ---
 
     colored_print(f"\n{'-'*55}", 'CYAN')
     colored_print(f"Repo: {repo_str} ({branch_name})", 'BLUE') 
+    
+    # *** PRINT CAPTURED FETCH OUTPUT HERE ***
+    if fetch_output:
+        print(fetch_output)
     
     # Get current HEAD for comparison later
     try:
@@ -207,27 +232,12 @@ def process_repo(repo_dir, commit_msg, errors):
 
         # 2) Stage
         run_git_command(['git', 'add', '-A'], cwd=repo_dir, check=True, silent=True)
-        # Check if anything is currently staged
-        staged_changes = run_git_command(['git', 'diff', '--staged', '--quiet'], cwd=repo_dir, check=False, capture_output=True, silent=True)
-
-        if not staged_changes:
-            colored_print(f"2) Stage: {COLORS['GREEN']}Changes staged.", 'BLUE')
-        else:
-            colored_print(f"2) Stage: {COLORS['GREEN']}✓ Nothing to stage.", 'BLUE')
-
-        # 3) Commit
-        # --- FIX: Only commit if git diff --staged --quiet indicates changes (returns nothing/error) ---
-        # If staged_changes is empty (meaning there *are* staged changes), we proceed.
-        # If staged_changes is NOT empty (meaning no changes, returns 0), we skip.
         
-        # We need to re-run the check as git add might have changed the status
+        # 3) Commit
         try:
-            # This command returns an exit code: 0 if clean, 1 if changes
             subprocess.run(['git', 'diff', '--staged', '--quiet'], cwd=repo_dir, check=True, capture_output=True)
-            # If check=True succeeds (exit code 0), it means NO changes are staged.
             has_staged_changes = False
         except subprocess.CalledProcessError:
-            # If check=True fails (exit code 1), it means there ARE staged changes.
             has_staged_changes = True
 
         if has_staged_changes:
@@ -247,13 +257,11 @@ def process_repo(repo_dir, commit_msg, errors):
                     print(formatted_stat)
                 
             except RuntimeError:
-                # If commit fails (e.g., empty commit message, though unlikely here)
                 colored_print(f"3) Commit: {COLORS['RED']}! Failed.", 'BLUE')
                 errors.append(f"{repo_str}: commit failed on branch {branch_name}")
                 return
         else:
             colored_print(f"3) Commit: {COLORS['GREEN']}✓ Nothing to commit.", 'BLUE')
-            # If there's nothing to commit, we check if there are unpushed commits that need pushing.
 
         # 4) Push (Handles new branches and existing ones)
         
@@ -279,7 +287,6 @@ def process_repo(repo_dir, commit_msg, errors):
                 if commits_to_push:
                     should_push = True
             except RuntimeError:
-                # If this log check fails (e.g., ref doesn't exist, though tracked), push anyway
                 should_push = True 
 
         if should_push:
