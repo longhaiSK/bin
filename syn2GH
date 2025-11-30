@@ -43,6 +43,7 @@ def run_git_command(command, cwd, check=True, capture_output=False, silent=False
                 env=dict(os.environ, GIT_SSH_COMMAND=GIT_SSH_COMMAND)
             )
         else:
+            # Captures both stdout and stderr for command results
             result = subprocess.run(
                 command,
                 cwd=cwd,
@@ -51,13 +52,25 @@ def run_git_command(command, cwd, check=True, capture_output=False, silent=False
                 text=True,
                 env=dict(os.environ, GIT_SSH_COMMAND=GIT_SSH_COMMAND)
             )
-            # When capturing, combine stdout and stderr for full Git messages
-            return result.stdout.strip() + '\n' + result.stderr.strip()
+            # Combine both outputs for comprehensive messaging, stripping empty lines
+            output_lines = []
+            if result.stdout:
+                output_lines.append(result.stdout.strip())
+            if result.stderr:
+                output_lines.append(result.stderr.strip())
+            return '\n'.join(line for line in output_lines if line)
+
     except subprocess.CalledProcessError as e:
         if check:
             stderr_output = e.stderr.strip() if e.stderr else 'No error message.'
             raise RuntimeError(f"Command failed: {' '.join(command)}\nStderr: {stderr_output}")
-        return None 
+        # Return combined output on failure (check=False) for diagnostic
+        output_lines = []
+        if e.stdout:
+            output_lines.append(e.stdout.strip())
+        if e.stderr:
+            output_lines.append(e.stderr.strip())
+        return '\n'.join(line for line in output_lines if line)
 
 def find_git_repos(root_dirs, exclude_regex):
     """Recursively finds all Git directories under the given roots, respecting the exclusion pattern."""
@@ -130,12 +143,10 @@ def process_repo(repo_dir, commit_msg, errors):
         
         # B) Check remote status (Fetch and capture output)
         try:
-            # Capture output from git fetch
+            # Capture output from git fetch (check=False handles non-zero exit for messages)
             fetch_output = run_git_command(['git', 'fetch', REMOTE, branch_name], cwd=repo_dir, check=False, capture_output=True, silent=True)
-            # Clean up the captured output
-            fetch_output = '\n'.join([line for line in fetch_output.splitlines() if line.strip()])
         except Exception:
-             pass # Fetch failures are ignored here, checked later
+             pass 
 
         # C) Check for commits ahead/behind (only needed if tracked)
         if tracking_ref:
@@ -177,7 +188,7 @@ def process_repo(repo_dir, commit_msg, errors):
     colored_print(f"\n{'-'*55}", 'CYAN')
     colored_print(f"Repo: {repo_str} ({branch_name})", 'BLUE') 
     
-    # *** PRINT CAPTURED FETCH OUTPUT HERE ***
+    # *** PRINT CAPTURED FETCH OUTPUT HERE (Ensures correct log order) ***
     if fetch_output:
         print(fetch_output)
     
