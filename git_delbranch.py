@@ -33,7 +33,7 @@ def delete_branch(branch_name):
         print(f"🛑 Error: Protected branch '{branch_name}' cannot be deleted via this script.")
         sys.exit(1)
 
-    print(f"🔥 Deleting branch '{branch_name}'...")
+    print(f"🔥 preparing to delete branch '{branch_name}'...")
 
     # 1. If we are currently ON the branch to be deleted, move to main first
     current = get_current_branch()
@@ -41,7 +41,37 @@ def delete_branch(branch_name):
         print(f"   (Currently checked out on {branch_name}, switching to main...)")
         run_git_command(['git', 'checkout', 'main'])
 
-    # 2. Delete Remote Branch
+    # 2. Check for unmerged commits (Safety Check)
+    # Check if local branch exists first to avoid errors
+    branch_exists = subprocess.run(['git', 'show-ref', '--verify', '--quiet', f'refs/heads/{branch_name}'], check=False).returncode == 0
+    
+    if branch_exists:
+        try:
+            # Check commits in branch_name that are NOT in main
+            unmerged = subprocess.run(
+                ['git', 'log', f'main..{branch_name}', '--oneline'], 
+                capture_output=True, 
+                text=True
+            ).stdout.strip()
+
+            if unmerged:
+                print(f"\n⚠️  WARNING: Branch '{branch_name}' contains commits NOT merged into 'main':")
+                lines = unmerged.split('\n')
+                for line in lines[:5]:
+                    print(f"   - {line}")
+                if len(lines) > 5:
+                    print(f"   ... and {len(lines) - 5} more.")
+                
+                print("\n   If you delete this branch now, these changes might be lost.")
+                confirm = input(f"❓ Are you SURE you want to delete '{branch_name}'? (yes/no): ").strip().lower()
+                
+                if confirm != 'yes':
+                    print("❌ Deletion aborted. Please merge your changes first.")
+                    sys.exit(0)
+        except Exception:
+            pass # Skip check if git log fails for some reason
+
+    # 3. Delete Remote Branch
     print("   Attempting to delete remote branch...")
     try:
         # Check=False prevents crash if remote branch doesn't exist
@@ -53,20 +83,26 @@ def delete_branch(branch_name):
     except Exception:
         pass
 
-    # 3. Delete Local Branch
+    # 4. Delete Local Branch
     print("   Attempting to delete local branch...")
     try:
         # We use -d (safe delete) first. If it fails, we ask/warn user.
-        # If you want forced delete, change '-d' to '-D'.
+        # If the user explicitly confirmed unmerged deletion above, we could use -D, 
+        # but sticking to -d allows git's internal safety to work if we missed something,
+        # unless we want to force it. Let's try force delete if confirmed unmerged above?
+        # For simplicity, we stick to the original logic but suggest -D.
+        
         result = subprocess.run(['git', 'branch', '-d', branch_name], check=False, capture_output=True, text=True)
         
         if result.returncode == 0:
             print(f"   ✅ Local branch '{branch_name}' deleted.")
         else:
-            # If safe delete fails (unmerged changes), try force delete?
-            # Uncomment the lines below to auto-force delete, or leave as is to warn.
-            print(f"   ⚠️  Could not delete local branch safely (it might contain unmerged changes).")
-            print(f"   To force delete, run: git branch -D {branch_name}")
+            # If safe delete fails (unmerged changes), force delete is likely needed
+            print(f"   ⚠️  Safe delete failed (likely unmerged changes).")
+            force = input(f"   Force delete local branch '{branch_name}'? (yes/no): ").strip().lower()
+            if force == 'yes':
+                 run_git_command(['git', 'branch', '-D', branch_name])
+                 print(f"   ✅ Local branch '{branch_name}' force deleted.")
             
     except Exception:
         pass
@@ -83,11 +119,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-```
-eof
-
-### 🚀 Usage
-
-1.  **Merge & Save (No delete prompt):**
-    ```bash
-    git-branch.py --done
