@@ -59,85 +59,60 @@ def start_branch(branch_name):
         except Exception:
             pass
 
-def merge_and_delete(feature_branch, target_branch='main'):
-    """Auto-commits, merges with specific msg, and prompts deletion."""
+def merge_sequence(feature_branch, target_branch='main'):
+    """Auto-commits changes, merges into target, and pushes target."""
     
-    # Safety check: Don't try to merge main into main
     if feature_branch == target_branch:
         print(f"🛑 You are already on '{target_branch}'. Cannot merge into itself.")
         sys.exit(1)
 
     print(f"\n--- Starting Merge Process for '{feature_branch}' ---")
 
-    # 1. Switch to feature branch (ensure we are there)
+    # 1. Ensure we are on the feature branch
     run_git_command(['git', 'checkout', feature_branch])
 
-    # 2. Auto-save: Stage and commit any local changes
+    # 2. Auto-save local work
     run_git_command(['git', 'add', '-A'])
     
     try:
-        # Check if there are changes to commit
+        # Check for uncommitted changes
         subprocess.run(['git', 'diff', '--staged', '--quiet'], check=True, capture_output=True)
         print(f"No new changes to auto-save on '{feature_branch}'.")
     except subprocess.CalledProcessError:
-        # --- CHANGE: Fixed commit message ---
         commit_msg = "auto commit by git_branch.py"
         print(f"💾 Auto-saving work: '{commit_msg}'")
         run_git_command(['git', 'commit', '-m', commit_msg])
         
-        # Push to remote for backup
         print(f"Pushing '{feature_branch}' to remote...")
         try:
             run_git_command(['git', 'push', 'origin', feature_branch])
         except SystemExit:
             print("⚠️ Warning: Push failed. Continuing with local merge...")
 
-    # 3. Switch to target branch and pull latest changes
+    # 3. Switch to target and update
     print(f"Pulling latest changes on '{target_branch}'...")
     run_git_command(['git', 'checkout', target_branch])
     run_git_command(['git', 'pull', '--rebase', 'origin', target_branch])
 
-    # 4. Perform the merge
-    # --- CHANGE: Automated Merge Message to skip Vim ---
+    # 4. Merge
     date_str = datetime.now().strftime("%Y%m%d")
     merge_msg = f"merging {feature_branch}-{date_str}"
     
     print(f"Merging '{feature_branch}' into '{target_branch}' with message: '{merge_msg}'...")
     
     try:
-        # --no-ff ensures a merge commit
-        # -m passes the message directly, skipping the editor
         run_git_command(['git', 'merge', '--no-ff', '-m', merge_msg, feature_branch])
         print(f"✅ Merge successful!")
         
-        # 5. Push the merged target branch
+        # 5. Push target
         print(f"Pushing merged '{target_branch}' to origin...")
         run_git_command(['git', 'push', 'origin', target_branch])
 
     except SystemExit:
         print(f"❌ Merge failed. Please resolve conflicts in '{target_branch}' manually.")
         sys.exit(1)
-
-    # 6. Prompt for deletion
-    print("-" * 30)
-    user_input = input(f"❓ Do you want to delete the branch '{feature_branch}' locally and remotely? (Yes/No): ").strip().lower()
-
-    if user_input == 'yes':
-        # Delete Local
-        try:
-            subprocess.run(['git', 'branch', '-d', feature_branch], check=True)
-            print(f"🗑️ Deleted local branch: {feature_branch}")
-        except subprocess.CalledProcessError:
-            print(f"⚠️ Warning: Could not delete local branch '{feature_branch}'. You might need 'git branch -D {feature_branch}'.")
-            
-        # Delete Remote
-        try:
-            subprocess.run(['git', 'push', 'origin', '--delete', feature_branch], check=True)
-            print(f"🗑️ Deleted remote branch: origin/{feature_branch}")
-        except subprocess.CalledProcessError:
-            print(f"⚠️ Warning: Could not delete remote branch. It might not exist.")
-    else:
-        print(f"Skipping deletion. Branch '{feature_branch}' remains intact.")
+        
+    print(f"🎉 Done! '{feature_branch}' is merged into '{target_branch}'.")
 
 def main():
     if len(sys.argv) < 2:
@@ -149,17 +124,15 @@ def main():
 
     arg1 = sys.argv[1]
     
-    # Logic for --done (Auto-detect current branch)
     if arg1 == '--done':
         current_branch = get_current_branch()
         if not current_branch:
             print("Error: Could not detect current branch.")
             sys.exit(1)
-        merge_and_delete(current_branch)
+        merge_sequence(current_branch)
 
-    # Logic for specific branch operations
     elif len(sys.argv) == 3 and sys.argv[2] == '--merge':
-        merge_and_delete(arg1)
+        merge_sequence(arg1)
     elif len(sys.argv) == 2:
         start_branch(arg1)
     else:
