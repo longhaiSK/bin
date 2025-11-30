@@ -95,8 +95,9 @@ def merge_sequence(feature_branch, target_branch='main'):
     run_git_command(['git', 'pull', '--rebase', 'origin', target_branch])
 
     # 4. Merge
-    date_str = datetime.now().strftime("%Y%m%d")
-    merge_msg = f"merging {feature_branch}-{date_str}"
+    # Updated timestamp format to include hours and minutes for better uniqueness
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M")
+    merge_msg = f"merging {feature_branch}-{timestamp}"
     
     print(f"Merging '{feature_branch}' into '{target_branch}' with message: '{merge_msg}'...")
     
