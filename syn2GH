@@ -141,10 +141,16 @@ def process_repo(repo_dir, commit_msg, errors):
         if run_git_command(['git', 'status', '--porcelain'], cwd=repo_dir, capture_output=True, silent=True):
             has_local_changes = True
         
-        # B) Check remote status (Fetch and capture output)
+        # B) Check remote status (Fetch and silence output for status check)
         try:
-            # Capture output from git fetch (check=False handles non-zero exit for messages)
-            fetch_output = run_git_command(['git', 'fetch', REMOTE, branch_name], cwd=repo_dir, check=False, capture_output=True, silent=True)
+            # *** FIX: Use subprocess.run directly to control output streams ***
+            subprocess.run(
+                ['git', 'fetch', REMOTE, branch_name, '--quiet'], 
+                cwd=repo_dir, 
+                check=False,
+                stdout=subprocess.DEVNULL, # Explicitly discard stdout
+                stderr=subprocess.DEVNULL  # Explicitly discard stderr
+            )
         except Exception:
              pass 
 
@@ -185,10 +191,18 @@ def process_repo(repo_dir, commit_msg, errors):
 
     # --- ACTION ---
 
+    # Re-run fetch *un-silently* IF it's a core branch to capture status for the log
+    if is_core_branch:
+        try:
+            fetch_output = run_git_command(['git', 'fetch', REMOTE, branch_name], cwd=repo_dir, check=False, capture_output=True, silent=True)
+            fetch_output = '\n'.join([line for line in fetch_output.splitlines() if line.strip() and not line.strip().startswith('From ')])
+        except Exception:
+             fetch_output = ""
+             
     colored_print(f"\n{'-'*55}", 'CYAN')
     colored_print(f"Repo: {repo_str} ({branch_name})", 'BLUE') 
     
-    # *** PRINT CAPTURED FETCH OUTPUT HERE (Ensures correct log order) ***
+    # Print captured fetch output here (Ensures correct log order)
     if fetch_output:
         print(fetch_output)
     
