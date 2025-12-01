@@ -40,20 +40,21 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 
+# --- FIX: Disable Output Buffering ---
+sys.stdout.reconfigure(line_buffering=True)
 
-# --- Configuration (Mirroring Zsh Defaults) ---
-# Note: Python typically handles PATH better than shell scripts
-# but you can prepend /opt/homebrew/bin if necessary.
+# --- Configuration ---
 REPO_ROOTS = [Path(os.environ.get('githubroot', os.path.expanduser('~/Github')))]
 REMOTE = os.environ.get('REMOTE', 'origin')
-BRANCH = os.environ.get('BRANCH', 'main')
 GIT_SSH_COMMAND = os.environ.get('GIT_SSH_COMMAND', 'ssh')
+
+# --- Define core branches that require full pull/sync ---
+CORE_BRANCHES = ['main', 'master', 'develop']
 
 # Exclude heavy/noisy directories
 EXCLUDE_REGEX = re.compile(r'(/node_modules/|/\.venv/|/\.cargo/)')
 
 # --- Colors (ANSI Escape Codes) ---
-# Using a dictionary for easy look-up
 COLORS = {
     'BLUE': '\033[0;34m',
     'GREEN': '\033[32m',
@@ -63,15 +64,14 @@ COLORS = {
     'NONE': '\033[0m'
 }
 
-def colored_print(text, color_key):
-    """Prints text in the specified color."""
-    print(f"{COLORS.get(color_key, COLORS['NONE'])}{text}{COLORS['NONE']}")
+def colored_string(text, color_key):
+    """Returns text wrapped in the specified color codes."""
+    return f"{COLORS.get(color_key, COLORS['NONE'])}{text}{COLORS['NONE']}"
 
 def run_git_command(command, cwd, check=True, capture_output=False, silent=False):
     """Wrapper for running Git commands."""
     try:
         if not silent and not capture_output:
-            # Run without capturing, allowing output to stream directly
             return subprocess.run(
                 command,
                 cwd=cwd,
@@ -80,7 +80,6 @@ def run_git_command(command, cwd, check=True, capture_output=False, silent=False
                 env=dict(os.environ, GIT_SSH_COMMAND=GIT_SSH_COMMAND)
             )
         else:
-            # Run capturing output
             result = subprocess.run(
                 command,
                 cwd=cwd,
@@ -89,38 +88,42 @@ def run_git_command(command, cwd, check=True, capture_output=False, silent=False
                 text=True,
                 env=dict(os.environ, GIT_SSH_COMMAND=GIT_SSH_COMMAND)
             )
-            return result.stdout.strip()
+            output_lines = []
+            if result.stdout:
+                output_lines.append(result.stdout.strip())
+            if result.stderr:
+                output_lines.append(result.stderr.strip())
+            return '\n'.join(line for line in output_lines if line)
+
     except subprocess.CalledProcessError as e:
         if check:
-            raise RuntimeError(f"Command failed: {' '.join(command)}\nStderr: {e.stderr.strip()}")
-        return None # Return None if check=False and command fails
+            stderr_output = e.stderr.strip() if e.stderr else 'No error message.'
+            raise RuntimeError(f"Command failed: {' '.join(command)}\nStderr: {stderr_output}")
+        output_lines = []
+        if e.stdout:
+            output_lines.append(e.stdout.strip())
+        if e.stderr:
+            output_lines.append(e.stderr.strip())
+        return '\n'.join(line for line in output_lines if line)
 
 def find_git_repos(root_dirs, exclude_regex):
-    """Recursively finds all Git directories under the given roots, respecting the exclusion pattern."""
+    """Recursively finds all Git directories under the given roots."""
     repo_dirs = set()
     for root in root_dirs:
         if not root.is_dir():
             continue
-
-        # Use glob to find .git directories efficiently
         for git_dir in root.rglob('.git'):
             repo_path = git_dir.parent.resolve()
-            
-            # Skip if the path matches the exclusion regex
             if exclude_regex.search(str(repo_path)):
                 continue
-
-            # Check if this is a standalone .git directory or a worktree (we only want the main worktree)
             if (repo_path / '.git').is_dir():
                 repo_dirs.add(repo_path)
     
-    # Sort the list alphabetically (case-insensitive)
     return sorted(list(repo_dirs), key=lambda p: str(p).lower())
 
 def get_tracking_ref(repo_dir, branch_name):
-    """Determines the current upstream tracking branch, setting it if necessary."""
+    """Determines the current upstream tracking branch."""
     try:
-        # Check current tracking ref
         tracking_ref = run_git_command(
             ['git', 'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'],
             cwd=repo_dir,
@@ -128,272 +131,248 @@ def get_tracking_ref(repo_dir, branch_name):
             capture_output=True,
             silent=True
         )
+        if 'fatal:' in tracking_ref or 'unknown revision' in tracking_ref or not tracking_ref:
+             return None
+        return tracking_ref
     except RuntimeError:
-        tracking_ref = None
+        return None
 
-    if tracking_ref is None:
-        # If no tracking ref is set, try to set it to origin/<HEAD branch>
+def process_repo(repo_dir, commit_msg, errors):
+    repo_str = str(repo_dir)
+
+    # 1. Validation Checks & Get Current Branch Name
+    try:
+        if not run_git_command(['git', 'rev-parse', '--is-inside-work-tree'], cwd=repo_dir, check=False, capture_output=True, silent=True):
+             return
+        branch_name = run_git_command(['git', 'symbolic-ref', '--quiet', '--short', 'HEAD'], cwd=repo_dir, capture_output=True, silent=True)
+        if not branch_name:
+            return 
+        run_git_command(['git', 'remote', 'get-url', REMOTE], cwd=repo_dir, check=True, capture_output=True, silent=True)
+        
+    except (subprocess.CalledProcessError, RuntimeError):
+        return 
+
+    is_core_branch = branch_name in CORE_BRANCHES
+    tracking_ref = get_tracking_ref(repo_dir, branch_name)
+
+    # 3. Check Status (Fast check to exit early)
+    has_local_changes = False
+    is_ahead = False
+    is_behind = False
+
+    try:
+        if run_git_command(['git', 'status', '--porcelain'], cwd=repo_dir, capture_output=True, silent=True):
+            has_local_changes = True
+        
+        # Silent Fetch
         try:
-            # Get the default HEAD branch name from remote
-            remote_show = run_git_command(
-                ['git', 'remote', 'show', 'origin'],
+            subprocess.run(
+                ['git', 'fetch', REMOTE, branch_name, '--quiet'], 
+                cwd=repo_dir, 
+                check=False,
+                stdout=subprocess.DEVNULL, 
+                stderr=subprocess.DEVNULL 
+            )
+        except Exception:
+             pass 
+
+        if tracking_ref:
+            counts_str = run_git_command(
+                ['git', 'rev-list', '--left-right', '--count', f'HEAD...{tracking_ref}'],
                 cwd=repo_dir,
                 check=False,
                 capture_output=True,
                 silent=True
-            )
-            default_remote_branch = next(
-                (line.split()[-1] for line in remote_show.splitlines() if 'HEAD branch:' in line),
-                None
-            )
-            
-            if default_remote_branch:
-                upstream_ref = f"origin/{default_remote_branch}"
-                
-                # Try to set upstream
-                result = run_git_command(
-                    ['git', 'branch', '--set-upstream-to', upstream_ref, branch_name],
-                    cwd=repo_dir,
-                    check=False,
-                    capture_output=True,
-                    silent=True
-                )
-                
-                if result is not None:
-                    tracking_ref = upstream_ref
+            ) or "0 0"
+            try:
+                ahead, behind = map(int, counts_str.split())
+                if ahead > 0: is_ahead = True
+                if behind > 0: is_behind = True
+            except ValueError:
+                is_ahead = True 
 
-        except RuntimeError:
-            pass # Ignore errors during tracking ref setup
-
-    return tracking_ref
-
-def process_repo(repo_dir, commit_msg, errors):
-    """Performs the pull-stage-commit-push sequence for a single repository."""
-    
-    repo_str = str(repo_dir)
-
-    # 1. Validation Checks (Mirroring Zsh logic)
-    try:
-        # Check if it's a git repo
-        if not run_git_command(['git', 'rev-parse', '--is-inside-work-tree'], cwd=repo_dir, check=False, capture_output=True, silent=True):
-             return
-
-        # Get current branch name
-        branch_name = run_git_command(['git', 'symbolic-ref', '--quiet', '--short', 'HEAD'], cwd=repo_dir, capture_output=True, silent=True)
-        if not branch_name:
-            return
-
-        # Check if origin is defined
-        run_git_command(['git', 'remote', 'get-url', 'origin'], cwd=repo_dir, check=True, capture_output=True, silent=True)
-        
-    except (subprocess.CalledProcessError, RuntimeError):
-        return # Skip non-operational repos
-
-    # 2. Upstream Tracking Setup
-    tracking_ref = get_tracking_ref(repo_dir, branch_name)
-
-    # 3. Check Status (Speed optimization)
-    needs_action = False
-    
-    try:
-        # Check for local dirty state
-        if run_git_command(['git', 'status', '--porcelain'], cwd=repo_dir, capture_output=True, silent=True):
-            needs_action = True
-        else:
-            # Check remote status (Fetch quietly)
-            run_git_command(['git', 'fetch', 'origin', branch_name, '--quiet'], cwd=repo_dir, check=False, silent=True)
-            
-            if tracking_ref:
-                # Check for ahead/behind counts
-                counts_str = run_git_command(
-                    ['git', 'rev-list', '--left-right', '--count', 'HEAD...@{u}'],
-                    cwd=repo_dir,
-                    check=False,
-                    capture_output=True,
-                    silent=True
-                ) or "0 0"
-                
-                try:
-                    ahead, behind = map(int, counts_str.split())
-                    if ahead != 0 or behind != 0:
-                        needs_action = True
-                except ValueError:
-                    needs_action = True # If parsing fails, assume action is needed
-
-            else:
-                needs_action = True # Needs action if no tracking ref is set
-                
     except RuntimeError:
-        # If any status check fails (e.g., fetch error), proceed with action to try and resolve
-        needs_action = True 
+        pass 
 
-    if not needs_action:
-        return # Nothing to do
+    # Logic to proceed
+    needs_action = False
+    if has_local_changes:
+        needs_action = True
+    elif not tracking_ref and run_git_command(['git', 'log', f'{REMOTE}/{branch_name}..HEAD'], cwd=repo_dir, check=False, capture_output=True, silent=True):
+        needs_action = True
+    elif is_core_branch and (is_ahead or is_behind):
+        needs_action = True
+    elif not is_core_branch and is_ahead:
+        needs_action = True
+    else:
+        return 
 
-    # --- ACTION ---
-
-    colored_print(f"\n{'-'*55}", 'CYAN')
-    colored_print(f"Repo: {repo_str}", 'BLUE')
+    # --- ACTION (Buffered Output) ---
     
-    # Get current HEAD for comparison later
+    # We buffer logs and only print them if a meaningful action occurs
+    log_buffer = []
+    action_taken = False
+    
+    fetch_output = ""
+    if is_core_branch:
+        try:
+            fetch_output = run_git_command(['git', 'fetch', REMOTE, branch_name], cwd=repo_dir, check=False, capture_output=True, silent=True)
+            fetch_output = '\n'.join([line for line in fetch_output.splitlines() if line.strip() and not line.strip().startswith('From ')])
+        except Exception:
+             fetch_output = ""
+    
+    if fetch_output:
+        log_buffer.append(fetch_output)
+
     try:
         old_head = run_git_command(['git', 'rev-parse', 'HEAD'], cwd=repo_dir, capture_output=True, silent=True)
     except RuntimeError:
-        # If HEAD doesn't exist (e.g., new repo), set a placeholder
         old_head = "INITIAL_COMMIT" 
 
-    # 1) Pull (Rebase/Autostash)
-    pull_success = True
-    if tracking_ref:
+    # 1) Pull
+    if is_core_branch and tracking_ref: 
         try:
-            # Pull with output streaming to console (not captured)
-            print(f"{COLORS['BLUE']}1) Pull: {COLORS['NONE']}", end="")
-            run_git_command(['git', 'pull', '--rebase', '--autostash', REMOTE, branch_name], cwd=repo_dir, check=True)
+            pull_out = run_git_command(['git', 'pull', '--rebase', '--autostash', REMOTE, branch_name], cwd=repo_dir, check=True, capture_output=True)
+            # We assume output from pull usually indicates activity, but we verify with head change
         except RuntimeError:
-            colored_print(f"\n  ! Pull failed. Resolve conflicts manually.", 'RED')
-            errors.append(f"{repo_str}: pull failed")
-            pull_success = False
+            print(colored_string(f"\n{'-'*55}", 'CYAN'))
+            print(colored_string(f"Repo: {repo_str} ({branch_name})", 'BLUE'))
+            print(colored_string(f"\n  ! Pull failed. Resolve conflicts manually.", 'RED'))
+            errors.append(f"{repo_str}: pull failed on branch {branch_name}")
+            return # Exit immediately on error, printing header
+    else:
+        # Feature pull is skipped, so no log needed unless debugging
+        pass
 
-    if pull_success:
+    try:
+        new_head = run_git_command(['git', 'rev-parse', 'HEAD'], cwd=repo_dir, capture_output=True, silent=True)
+    except RuntimeError:
+        new_head = None
+
+    # Check if Pull did something
+    if old_head != new_head and old_head != "INITIAL_COMMIT":
+        action_taken = True
+        log_buffer.append(colored_string(f"1) Pull (CORE): {COLORS['GREEN']}↓ Changes pulled:", 'BLUE'))
+        log_output = run_git_command(
+            ['git', 'log', f'{old_head}..{new_head}', '--pretty=format:      %C(yellow)%h%C(reset) - %s %C(cyan)(%an, %ar)%C(reset)'],
+            cwd=repo_dir,
+            capture_output=True,
+            silent=True
+        )
+        log_buffer.append(log_output)
+        
+    # 2) Stage
+    run_git_command(['git', 'add', '-A'], cwd=repo_dir, check=True, silent=True)
+    
+    # 3) Commit
+    has_staged_changes = False
+    try:
+        subprocess.run(['git', 'diff', '--staged', '--quiet'], cwd=repo_dir, check=True, capture_output=True)
+        has_staged_changes = False
+    except subprocess.CalledProcessError:
+        has_staged_changes = True
+
+    if has_staged_changes:
         try:
-            new_head = run_git_command(['git', 'rev-parse', 'HEAD'], cwd=repo_dir, capture_output=True, silent=True)
-        except RuntimeError:
-            new_head = None
-
-        if old_head != new_head and old_head != "INITIAL_COMMIT":
-            colored_print(f"1) Pull: {COLORS['GREEN']}↓ Changes pulled:", 'BLUE')
-            log_output = run_git_command(
-                ['git', 'log', f'{old_head}..{new_head}', '--pretty=format:      %C(yellow)%h%C(reset) - %s %C(cyan)(%an, %ar)%C(reset)'],
-                cwd=repo_dir,
-                capture_output=True,
-                silent=True
-            )
-            print(log_output)
-            print("")
-            diff_stat = run_git_command(
-                ['git', 'diff', '--stat', f'{old_head}..{new_head}'],
-                cwd=repo_dir,
-                capture_output=True,
-                silent=True
-            )
-            print('\n'.join("      " + line for line in diff_stat.splitlines()))
-        else:
-            colored_print(f"1) Pull: {COLORS['GREEN']}✓ Up-to-date.", 'BLUE')
-
-        # 2) Stage
-        run_git_command(['git', 'add', '-A'], cwd=repo_dir, check=True, silent=True)
-        
-        # Check if anything is staged
-        staged_changes = run_git_command(['git', 'diff', '--staged', '--quiet'], cwd=repo_dir, check=False, capture_output=True, silent=True)
-
-        if not staged_changes:
-            colored_print(f"2) Stage: {COLORS['GREEN']}Changes staged.", 'BLUE')
-        else:
-            colored_print(f"2) Stage: {COLORS['GREEN']}✓ Nothing to stage.", 'BLUE')
-
-        # 3) Commit
-        if not staged_changes:
-            try:
-                run_git_command(['git', 'commit', '-m', commit_msg], cwd=repo_dir, check=True, silent=True)
-                colored_print(f"3) Commit: {COLORS['GREEN']}✓ Committed:", 'BLUE')
-                
-                # Show commit stat (formatted as requested)
-                commit_stat = run_git_command(
-                    ['git', 'show', '--stat', '--oneline', '--no-color', 'HEAD'],
-                    cwd=repo_dir,
-                    capture_output=True,
-                    silent=True
-                )
-                # Remove the first line (oneline summary) and format the rest with RED color
-                stat_lines = commit_stat.splitlines()
-                if len(stat_lines) > 1:
-                    formatted_stat = '\n'.join(f"      {COLORS['RED']}{line}{COLORS['NONE']}" for line in stat_lines[1:])
-                    print(formatted_stat)
-                
-            except RuntimeError:
-                colored_print(f"3) Commit: {COLORS['RED']}! Failed.", 'BLUE')
-                errors.append(f"{repo_str}: commit failed")
-                return
-        else:
-            colored_print(f"3) Commit: {COLORS['GREEN']}✓ Nothing to commit.", 'BLUE')
-
-        # 4) Push
-        
-        # Check if there are commits to push
-        if tracking_ref:
-            ref_to_check = tracking_ref
-        else:
-            ref_to_check = f'{REMOTE}/{branch_name}'
+            run_git_command(['git', 'commit', '-m', commit_msg], cwd=repo_dir, check=True, silent=True)
+            action_taken = True # Commit is a meaningful action
             
+            log_buffer.append(colored_string(f"3) Commit: {COLORS['GREEN']}✓ Committed:", 'BLUE'))
+            commit_stat = run_git_command(
+                ['git', 'show', '--stat', '--oneline', '--no-color', 'HEAD'],
+                cwd=repo_dir,
+                capture_output=True,
+                silent=True
+            )
+            stat_lines = commit_stat.splitlines()
+            if len(stat_lines) > 1:
+                formatted_stat = '\n'.join(f"      {COLORS['RED']}{line}{COLORS['NONE']}" for line in stat_lines[1:])
+                log_buffer.append(formatted_stat)
+        except RuntimeError:
+            print(colored_string(f"\n{'-'*55}", 'CYAN'))
+            print(colored_string(f"Repo: {repo_str} ({branch_name})", 'BLUE'))
+            print(colored_string(f"3) Commit: {COLORS['RED']}! Failed.", 'BLUE'))
+            errors.append(f"{repo_str}: commit failed on branch {branch_name}")
+            return
+
+    # 4) Push
+    should_push = False
+    push_options = [REMOTE, branch_name]
+    
+    if not tracking_ref:
+        should_push = True
+        push_options = ['--set-upstream', REMOTE, branch_name]
+    else:
+        ref_to_check = tracking_ref
         try:
             commits_to_push = run_git_command(
                 ['git', 'log', '--pretty=format:%h', f'{ref_to_check}..HEAD'], 
-                cwd=repo_dir, 
-                check=False, 
-                capture_output=True, 
-                silent=True
+                cwd=repo_dir, check=False, capture_output=True, silent=True
             )
+            if commits_to_push:
+                should_push = True
         except RuntimeError:
-            commits_to_push = "" # Assume nothing to push if check fails
+            should_push = True 
 
-        if commits_to_push:
-            try:
-                run_git_command(['git', 'push', REMOTE, branch_name], cwd=repo_dir, check=True, silent=True)
-                colored_print(f"4) Push: {COLORS['GREEN']}✓ Pushed successfully.", 'BLUE')
-            except RuntimeError:
-                colored_print(f"4) Push: {COLORS['RED']}↑ Push FAILED.", 'BLUE')
-                errors.append(f"{repo_str}: push failed")
-                return
-        else:
-            colored_print(f"4) Push: {COLORS['GREEN']}✓ Already pushed.", 'BLUE')
-            
+    if should_push:
+        try:
+            push_command = ['git', 'push'] + push_options
+            run_git_command(push_command, cwd=repo_dir, check=True, silent=True)
+            action_taken = True # Push is a meaningful action
+            log_buffer.append(colored_string(f"4) Push: {COLORS['GREEN']}✓ Pushed successfully.", 'BLUE'))
+        except RuntimeError:
+            print(colored_string(f"\n{'-'*55}", 'CYAN'))
+            print(colored_string(f"Repo: {repo_str} ({branch_name})", 'BLUE'))
+            print(colored_string(f"4) Push: {COLORS['RED']}↑ Push FAILED.", 'BLUE'))
+            errors.append(f"{repo_str}: push failed on branch {branch_name}")
+            return
+
+    # --- FINAL OUTPUT DECISION ---
+    # Only print if something actually happened (action_taken)
+    if action_taken:
+        print(colored_string(f"\n{'-'*55}", 'CYAN'))
+        print(colored_string(f"Repo: {repo_str} ({branch_name})", 'BLUE'))
+        for log_line in log_buffer:
+            print(log_line)
+
 def main():
-    """Main function to orchestrate the Git synchronization process."""
-    
-    # Determine commit message
     if len(sys.argv) > 1:
         commit_msg = sys.argv[1]
     else:
-        # Get hostname robustly on macOS
         try:
             hostname = subprocess.check_output(['hostname'], text=True).strip()
         except Exception:
             hostname = 'unknown_host'
-            
         commit_msg = f"syn2GH from {hostname}"
 
-    # Print header
     start_ts = datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')
-    colored_print(f"syn2GH start: {start_ts} on {os.uname().nodename}", 'RED')
+    print(colored_string(f"syn2GH start: {start_ts} on {os.uname().nodename}", 'RED'))
     
-    # Find all repositories
     try:
         git_dirs = find_git_repos(REPO_ROOTS, EXCLUDE_REGEX)
     except Exception as e:
-        colored_print(f"Error finding repositories: {e}", 'RED')
+        print(colored_string(f"Error finding repositories: {e}", 'RED'))
         sys.exit(1)
         
     if not git_dirs:
-        colored_print("No git repositories found.", 'YELLOW')
+        print(colored_string("No git repositories found.", 'YELLOW'))
         sys.exit(0)
 
-    # Process each repository
     errors = []
     for repo in git_dirs:
         process_repo(repo, commit_msg, errors)
         
-    # Final Summary
     end_ts = datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')
-    colored_print(f"\n{'-'*55}", 'CYAN')
-    colored_print(f"syn2GH end: {end_ts} on {os.uname().nodename}", 'RED')
+    print(colored_string(f"\n{'-'*55}", 'CYAN'))
+    print(colored_string(f"syn2GH end: {end_ts} on {os.uname().nodename}", 'RED'))
 
     if errors:
-        colored_print(f"\n--- Errors ({len(errors)}) ---", 'RED')
+        print(colored_string(f"\n--- Errors ({len(errors)}) ---", 'RED'))
         for error in errors:
-            colored_print(f"  - {error}", 'RED')
+            print(colored_string(f"  - {error}", 'RED'))
         sys.exit(1)
     else:
-        colored_print("\n--- Synchronization complete with no errors. ---", 'GREEN')
+        print(colored_string("\n--- Synchronization complete with no errors. ---", 'GREEN'))
         sys.exit(0)
 
 if __name__ == "__main__":
