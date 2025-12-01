@@ -1,10 +1,44 @@
 #!/Users/lol553/Github/bin/.venv/bin/python
-import os
-import subprocess
+
+
 import sys
+import subprocess
+import importlib
+
+def require(package_name):
+    """
+    Python equivalent of R's require(): 
+    Checks if a package exists; if not, installs it using pip.
+    """
+    try:
+        importlib.import_module(package_name)
+    except ImportError:
+        print(f"📦 Package '{package_name}' not found. Installing...")
+        try:
+            # sys.executable ensures we install into the CURRENT python/venv
+            subprocess.check_call([sys.executable, "-m", "pip", "install", package_name])
+            print(f"✅ {package_name} installed successfully.")
+        except subprocess.CalledProcessError:
+            print(f"❌ Failed to install {package_name}.")
+            sys.exit(1)
+
+# --- 1. Standard Libraries (No install needed) ---
+import os
 import re
 from datetime import datetime
 from pathlib import Path
+
+# --- 2. External Libraries (Auto-install if missing) ---
+# Add any 3rd party packages you need here
+require("numpy")
+require("pandas")
+require("matplotlib")
+
+# --- 3. Import them now that they exist ---
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
 
 # --- FIX: Disable Output Buffering ---
 sys.stdout.reconfigure(line_buffering=True)
