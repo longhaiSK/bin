@@ -40,8 +40,26 @@ fi
 
 echo -e "${C_BLUE}4) Pushing to origin...${C_NONE}"
 if ! git push origin "$BRANCH_NAME"; then
-    echo -e "${C_RED}Push failed. Please check remote connection and permissions.${C_NONE}"
-    exit 1
+    echo -e "${C_YELLOW}First push attempt failed, trying with token-based auth...${C_NONE}"
+    
+    # For Codespace: use GitHub CLI if available
+    if command -v gh &> /dev/null; then
+        echo -e "${C_BLUE}Using GitHub CLI for authentication...${C_NONE}"
+        if gh auth status > /dev/null 2>&1; then
+            # Re-authenticate and retry
+            gh auth login --git-protocol https -h github.com 2>/dev/null || true
+            if ! git push origin "$BRANCH_NAME"; then
+                echo -e "${C_RED}Push failed even with GitHub CLI. Please check your permissions.${C_NONE}"
+                exit 1
+            fi
+        else
+            echo -e "${C_RED}GitHub CLI not authenticated. Please run: gh auth login${C_NONE}"
+            exit 1
+        fi
+    else
+        echo -e "${C_RED}Push failed. In Codespace, ensure GitHub CLI is authenticated or use: gh auth login${C_NONE}"
+        exit 1
+    fi
 fi
 
 echo -e "\n${C_GREEN}--- Sync completed successfully. ---${C_NONE}"
