@@ -1,5 +1,3 @@
-#!/bin/sh
-
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -8,8 +6,12 @@ GITHUB_USER="longhaiSK"
 DIR_ARG=""
 FORCE=0
 
-# Workspace root (env var 'githubroot' if set; else ~/Github)
-GITHUB_ROOT="${githubroot:-$HOME/Github}"
+# Detect Codespaces and set git root accordingly
+if [ -n "${CODESPACES:-}" ] || grep -q codespaces /proc/1/cgroup 2>/dev/null; then
+  GITHUB_ROOT="/workspaces"
+else
+  GITHUB_ROOT="${githubroot:-$HOME/Github}"
+fi
 mkdir -p "$GITHUB_ROOT"
 cd "$GITHUB_ROOT"
 
@@ -93,9 +95,16 @@ if [[ -e "$CLONE_DIR" ]]; then
   fi
 fi
 
-# Clone with minimal history and no checkout
-echo "Cloning git@github.com:${GITHUB_USER}/${REPO}.git into '$CLONE_DIR'..."
-git clone --depth 1 --no-checkout "git@github.com:${GITHUB_USER}/${REPO}.git" "$CLONE_DIR"
+
+# Clone with minimal history and no checkout, using HTTPS in Codespaces
+if [ -n "${CODESPACES:-}" ] || grep -q codespaces /proc/1/cgroup 2>/dev/null; then
+  CLONE_URL="https://github.com/${GITHUB_USER}/${REPO}.git"
+  echo "Cloning $CLONE_URL into '$CLONE_DIR' (HTTPS, Codespaces)..."
+else
+  CLONE_URL="git@github.com:${GITHUB_USER}/${REPO}.git"
+  echo "Cloning $CLONE_URL into '$CLONE_DIR' (SSH)..."
+fi
+git clone --depth 1 --no-checkout "$CLONE_URL" "$CLONE_DIR"
 
 cd "$CLONE_DIR"
 

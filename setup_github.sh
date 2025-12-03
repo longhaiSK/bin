@@ -23,9 +23,15 @@ if [ -w "$HOME" ]; then
 	fi
 fi
 
-# Authenticate with GitHub CLI for all repos
-echo "Starting GitHub CLI authentication..."
-gh auth login --web
+
+# Authenticate with GitHub CLI for all repos (only if not already authenticated)
+if ! gh auth status 2>&1 | grep -q "Logged in to github.com"; then
+	echo "Starting GitHub CLI authentication..."
+	gh auth login --web
+else
+	echo "GitHub CLI authentication already in place."
+fi
+
 
 # Show authentication status
 echo
@@ -35,3 +41,5 @@ echo
 echo "You are now authenticated with GitHub CLI. You can push/pull to all your repos from this Codespace."
 echo "Test with: git push --dry-run or gh repo list"
 exit 0
+
+git config --global credential.helper '!gh auth git-credential'
