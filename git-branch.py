@@ -47,11 +47,49 @@ def is_branch_exist(branch_name):
     )
     return result.returncode == 0
 
+# --- NEW FUNCTION FOR SYNCING WITH MAIN ---
+def sync_with_main(current_branch, main_branch='main'):
+    """Fetches updates from main, and merges them into the current branch."""
+    print(f"\n🔄 Syncing '{current_branch}' with latest '{main_branch}'...")
+    
+    # 1. Fetch all updates from remote
+    run_git_command(['git', 'fetch', 'origin'])
+
+    # 2. Check for uncommitted changes on current branch
+    try:
+        subprocess.run(['git', 'diff', '--quiet'], check=True, capture_output=True)
+    except subprocess.CalledProcessError:
+        print("🛑 Uncommitted changes detected. Skipping auto-merge to avoid conflicts.")
+        print(f"Please commit or stash your changes before syncing with '{main_branch}'.")
+        return # Exit the sync process
+
+    try:
+        # Perform the merge: origin/main into current_branch
+        run_git_command(['git', 'merge', f'origin/{main_branch}', '--no-ff', '-m', f"Merge main into {current_branch} via script sync"])
+        print(f"✅ Auto-merge from '{main_branch}' successful.")
+        
+        # Push the synced branch to remote
+        print(f"Pushing synced '{current_branch}' to remote...")
+        try:
+            run_git_command(['git', 'push', 'origin', current_branch])
+        except SystemExit:
+            print("⚠️ Warning: Push failed after sync. Please push manually.")
+
+    except SystemExit:
+        print(f"❌ Auto-merge from '{main_branch}' failed. Conflicts must be resolved manually.")
+        print(f"You are still on '{current_branch}'. Please resolve the conflicts and commit/push.")
+
 def start_branch(branch_name):
-    """Creates a new branch or switches to an existing one."""
+    """Creates a new branch or switches to an existing one, and optionally syncs."""
     if is_branch_exist(branch_name):
         print(f"✅ Branch '{branch_name}' already exists. Switching...")
         run_git_command(['git', 'checkout', branch_name])
+        
+        # --- NEW LOGIC: Sync with main after switching to an existing branch ---
+        if branch_name != 'main': # Don't try to sync main into itself
+            sync_with_main(branch_name)
+        # ----------------------------------------------------------------------
+        
     else:
         print(f"✨ Starting new branch: '{branch_name}'")
         run_git_command(['git', 'checkout', '-b', branch_name])
@@ -143,7 +181,7 @@ def merge_and_delete(feature_branch, target_branch='main'):
 def main():
     if len(sys.argv) < 2:
         print("Usage:")
-        print("  1. git-branch.py <branch_name>          (Start/Switch branch)")
+        print("  1. git-branch.py <branch_name>      (Start/Switch branch, auto-syncs main if existing)")
         print("  2. git-branch.py <branch_name> --merge  (Merge specific branch)")
         print("  3. git-branch.py --done                 (Merge CURRENT branch)")
         sys.exit(1)
