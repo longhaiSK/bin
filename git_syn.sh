@@ -40,24 +40,26 @@ fi
 
 echo -e "${C_BLUE}4) Pushing to origin...${C_NONE}"
 if ! git push origin "$BRANCH_NAME"; then
-    echo -e "${C_YELLOW}First push attempt failed, trying with token-based auth...${C_NONE}"
+    echo -e "${C_YELLOW}Direct push failed. Attempting with GitHub CLI...${C_NONE}"
     
     # For Codespace: use GitHub CLI if available
-    if command -v gh &> /dev/null; then
-        echo -e "${C_BLUE}Using GitHub CLI for authentication...${C_NONE}"
-        if gh auth status > /dev/null 2>&1; then
-            # Re-authenticate and retry
-            gh auth login --git-protocol https -h github.com 2>/dev/null || true
-            if ! git push origin "$BRANCH_NAME"; then
-                echo -e "${C_RED}Push failed even with GitHub CLI. Please check your permissions.${C_NONE}"
-                exit 1
-            fi
+    if command -v gh &> /dev/null && gh auth status > /dev/null 2>&1; then
+        echo -e "${C_BLUE}Using GitHub CLI to push...${C_NONE}"
+        if ! gh repo view > /dev/null 2>&1; then
+            echo -e "${C_RED}Could not access repository with GitHub CLI.${C_NONE}"
+            exit 1
+        fi
+        
+        # Use git with gh's authentication
+        if ! GIT_TRACE=1 git push origin "$BRANCH_NAME" 2>&1 | grep -q "Permission denied"; then
+            echo -e "${C_GREEN}Push completed.${C_NONE}"
         else
-            echo -e "${C_RED}GitHub CLI not authenticated. Please run: gh auth login${C_NONE}"
+            echo -e "${C_RED}Push still failed. This may be a token scope issue in Codespace.${C_NONE}"
+            echo -e "${C_YELLOW}Try: gh auth refresh -s repo${C_NONE}"
             exit 1
         fi
     else
-        echo -e "${C_RED}Push failed. In Codespace, ensure GitHub CLI is authenticated or use: gh auth login${C_NONE}"
+        echo -e "${C_RED}Push failed and GitHub CLI is not available or not authenticated.${C_NONE}"
         exit 1
     fi
 fi
