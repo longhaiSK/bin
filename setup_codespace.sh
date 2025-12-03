@@ -44,6 +44,11 @@ if ssh -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
     echo -e "${C_GREEN}✓ SSH connection to GitHub successful${C_NONE}"
 elif ssh -T git@github.com 2>&1 | grep -q "Permission denied"; then
     echo -e "${C_YELLOW}⚠ SSH key not available, HTTPS will be used${C_NONE}"
+    
+    # Configure git to use GitHub CLI as credential helper for HTTPS
+    echo -e "${C_BLUE}Configuring GitHub CLI as credential helper...${C_NONE}"
+    git config --local credential.helper '!gh auth git-credential'
+    echo -e "${C_GREEN}✓ Git credential helper configured for HTTPS${C_NONE}"
 else
     echo -e "${C_YELLOW}⚠ Could not verify SSH connection${C_NONE}"
 fi
