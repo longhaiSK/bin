@@ -97,15 +97,13 @@ if [ "$NEEDS_RENDER" = true ]; then
   quarto render "$QMD" \
     --execute-param show_solutions=true \
     --to typst \
-    --output "${BASENAME}_with_solutions.pdf"
-  cp "${BASENAME}_with_solutions.pdf" "${BASENAME}.pdf"
+    --output "${BASENAME}.pdf"
   # 4. WITH SOLUTION - HTML
   quarto render "$QMD" \
     --execute-param show_solutions=true \
     --to html \
-    --output "${BASENAME}_with_solutions.html"
+    --output "${BASENAME}.html"
   # Create the standard 'basename.html' copy immediately
-  cp "${BASENAME}_with_solutions.html" "${BASENAME}.html"
   echo "  -> Created: ${BASENAME}.html"
   echo "------------------------------------------------"
   echo "All files rendered successfully."
@@ -114,42 +112,3 @@ if [ "$NEEDS_RENDER" = true ]; then
   echo "$CURRENT_TIME" > "$TIMESTAMP_FILE"
 fi
 
-# --- Release prompt (runs regardless of render) ---
-if [ -n "$DEST_DIR" ]; then
-
-  mkdir -p "$DEST_DIR"
-  if [ ! -d "$DEST_DIR" ]; then
-    echo "Error: Could not create destination directory '$DEST_DIR'."
-    exit 1
-  fi
-
-  echo ""
-  echo -n "Release to '$DEST_DIR'? (yes/no) [auto-cancel in 5s]: "
-
-  if read -t 5 answ; then
-    if [[ "$answ" =~ ^[Yy]([Ee][Ss])?$ ]]; then
-      echo "Releasing files..."
-      
-      # Copy the Standard versions (Clean names)
-      cp "${BASENAME}.pdf" "$DEST_DIR/"
-      cp "${BASENAME}.html" "$DEST_DIR/"
-      
-      # Copy the Solutions versions
-      cp "${BASENAME}_with_solutions.pdf" "$DEST_DIR/"
-      cp "${BASENAME}_with_solutions.html" "$DEST_DIR/"
-      
-      # (Optional) Copy the _qs versions if you really want them in destination too
-      # cp "${BASENAME}_qs.pdf" "$DEST_DIR/"
-      
-      echo "Done! Files copied to $DEST_DIR"
-    else
-      echo "Release cancelled by user."
-    fi
-  else
-    echo ""
-    echo "Timeout. Release skipped."
-  fi
-
-else
-  echo "No destination directory specified. Skipping release."
-fi
