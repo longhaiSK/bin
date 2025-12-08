@@ -30,11 +30,12 @@ except ImportError:
 # --- Time Calculation Function ---
 def _calculate_past_datetime(user_spec):
     """
-    Converts user input (e.g., '1.5h') into a datetime object for filtering.
+    Converts user input (e.g., '1.5h') into a formatted datetime string for the 'since' filter.
     """
     match = re.match(r"(\d+\.?\d*)([hdm])", user_spec, re.IGNORECASE)
     if not match:
-        raise ValueError(f"Invalid time specification format: {user_spec}. Use formats like 1h, 2d, 30m.")
+        # This function should only be called if the spec ends in h, d, or m
+        raise ValueError("Invalid time format.")
 
     number = float(match.groups()[0])
     unit = match.groups()[1].lower()
@@ -53,54 +54,79 @@ def _calculate_past_datetime(user_spec):
 
 
 # --- Main Logic: Summarize History ---
-def summarize_local_history(repo_path, time_spec):
+def summarize_local_history(repo_path, spec):
     """
-    Summarizes local commits within the specified time period, grouping 
-    commits under the files they affected.
+    Summarizes local history based on either a time period (e.g., 1h) or a 
+    commit count (e.g., 5c).
     """
     try:
-        since_time_str = _calculate_past_datetime(time_spec)
-
         repo = Repo(repo_path)
-        
-        # Dictionary to store file -> list of commits
         file_to_commits = {}
         
-        # 1. Iterate over commits using the 'since' argument (newest first)
-        for commit in repo.iter_commits('HEAD', since=since_time_str):
+        # 1. Determine Filtering Method (Time vs. Commit Count)
+        iter_args = {'rev': 'HEAD'}
+        if spec.lower().endswith(('h', 'd', 'm')):
+            # Time-based filtering (e.g., 1h, 2d)
+            since_time_str = _calculate_past_datetime(spec)
+            iter_args['since'] = since_time_str
+            print(f"\nFiltering by time (last {spec})...")
+            
+        elif spec.lower().endswith('c'):
+            # Commit count filtering (e.g., 5c)
+            try:
+                count = int(spec[:-1])
+                if count <= 0: raise ValueError
+            except ValueError:
+                raise ValueError(f"Invalid commit count: {spec}. Use format like 5c (where 5 is a positive integer).")
+                
+            iter_args['max_count'] = count
+            print(f"\nFiltering by commit count (last {count} commits)...")
+            
+        else:
+            raise ValueError(f"Invalid specification format: {spec}. Use time (1h, 2d, 30m) or commit count (5c).")
+
+
+        # 2. Iterate over commits using the determined arguments
+        for commit in repo.iter_commits(**iter_args):
             
             commit_time = datetime.datetime.fromtimestamp(commit.committed_date)
             commit_data = {
                 'id': commit.hexsha[:8],
                 'timestamp': commit_time.strftime('%Y-%m-%d %H:%M:%S'),
-                'summary': commit.summary.strip()
+                'summary': commit.summary.strip(),
             }
             
-            # Get files changed in this specific commit
-            changed_files = commit.stats.files.keys()
+            # Determine the diff index
+            if commit.parents:
+                diff_index = commit.parents[0].diff(commit)
+            else:
+                # Initial commit: diff against a null tree
+                diff_index = commit.diff(None) 
 
-            # 2. Populate the dictionary: link this commit data to every file it touched
-            for file in changed_files:
+            # 3. Process Diff for Status (A/M/D)
+            for diff in diff_index:
+                status = diff.change_type # 'A', 'M', 'D', 'R', etc.
+                file = diff.b_path if diff.b_path else diff.a_path 
+
                 if file not in file_to_commits:
                     file_to_commits[file] = []
-                file_to_commits[file].append(commit_data)
+                    
+                file_to_commits[file].append({
+                    **commit_data,
+                    'status': status
+                })
         
-        # 3. Print Output
-        
+        # 4. Print Output
         if file_to_commits:
-            print(f"\nSummary of Local Changes Committed in the Last {time_spec}:")
             print("---------------------------------------------------------")
             
-            # Print files (sorted) and their corresponding commits
             for file, commits in sorted(file_to_commits.items()):
                 print(f"- {file}")
                 
-                # Print commits indented beneath the file
                 for summary in commits:
-                    # Note the requested two-space indent and asterisk
-                    print(f"  * [{summary['id']}] ({summary['timestamp']}) {summary['summary']}")
+                    print(f"  * [{summary['id']}] [{summary['status']}] ({summary['timestamp']}) {summary['summary']}")
         else:
-            print(f"No commits found in the local repository within the last {time_spec}.")
+            print(f"No commits found in the local repository within the last {spec}.")
 
     except git.exc.InvalidGitRepositoryError:
         print(f"Error: The current working directory is not a valid Git repository.")
@@ -111,13 +137,15 @@ def summarize_local_history(repo_path, time_spec):
 
 # --- Command Line Execution ---
 if __name__ == "__main__":
-    if len(sys.argv) < 3 or sys.argv[1] != '--past':
-        print("Usage: python script_name.py --past <time_spec>")
-        print("Example: python script_name.py --past 1.5h")
-        print("Valid time specs: 1h, 2d, 45m, 0.5h, etc. (h=hours, d=days, m=minutes)")
+    if len(sys.argv) < 2:
+        print("Usage: python script_name.py <time_spec_or_commit_count>")
+        print("Example: python script_name.py 1.5h")
+        print("Example: python script_name.py 5c")
+        print("Valid time specs: 1h, 2d, 30m, etc. | Commit specs: 1c, 10c, etc.")
         sys.exit(1)
 
-    time_spec_input = sys.argv[2]
+    # Simplified argument parsing: spec is now sys.argv[1]
+    spec_input = sys.argv[1]
     repo_path = os.getcwd() 
     
-    summarize_local_history(repo_path, time_spec_input)
+    summarize_local_history(repo_path, spec_input)
