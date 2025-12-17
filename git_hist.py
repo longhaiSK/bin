@@ -1,4 +1,9 @@
-#!/Users/lol553/Github/bin/.venv/bin/python
+#!/bin/sh
+""":"
+exec "$(dirname "$0")/.venv/bin/python" "$0" "$@"
+"""
+
+
 import re
 import sys
 import os

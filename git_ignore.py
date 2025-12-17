@@ -1,4 +1,8 @@
-#!/usr/bin/env python3
+#!/bin/sh
+""":"
+exec "$(dirname "$0")/.venv/bin/python" "$0" "$@"
+"""
+
 
 import os
 import sys
@@ -36,7 +40,6 @@ RSTUDIO_PATTERNS = [
     "*.Rproj",
     ".Rhistory",
     ".RData",
-    "*.rds",
     ".ipynb_checkpoints/",
     "rsconnect/",
     "renv/",
