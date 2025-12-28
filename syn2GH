@@ -46,6 +46,9 @@ import matplotlib.pyplot as plt
 # --- FIX: Disable Output Buffering ---
 sys.stdout.reconfigure(line_buffering=True)
 
+# --- FIX: Set PATH for launchd (Crucial for finding git/ssh in background) ---
+os.environ['PATH'] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" + os.pathsep + os.environ.get('PATH', '')
+
 # --- Configuration ---
 REPO_ROOTS = [Path(os.environ.get('githubroot', os.path.expanduser('~/Github')))]
 REMOTE = os.environ.get('REMOTE', 'origin')
@@ -174,7 +177,7 @@ def process_repo(repo_dir, commit_msg, errors):
                 cwd=repo_dir, 
                 check=False,
                 stdout=subprocess.DEVNULL, 
-                stderr=subprocess.DEVNULL 
+                stderr=subprocess.DEVNULL
             )
         except Exception:
              pass 
@@ -323,10 +326,12 @@ def process_repo(repo_dir, commit_msg, errors):
             run_git_command(push_command, cwd=repo_dir, check=True, silent=True)
             action_taken = True # Push is a meaningful action
             log_buffer.append(colored_string(f"4) Push: {COLORS['GREEN']}✓ Pushed successfully.", 'BLUE'))
-        except RuntimeError:
+        except RuntimeError as e:
             print(colored_string(f"\n{'-'*55}", 'CYAN'))
             print(colored_string(f"Repo: {repo_str} ({branch_name})", 'BLUE'))
             print(colored_string(f"4) Push: {COLORS['RED']}↑ Push FAILED.", 'BLUE'))
+            # --- FIX: Print the actual reason ---
+            print(colored_string(f"    Reason: {e}", 'YELLOW'))
             errors.append(f"{repo_str}: push failed on branch {branch_name}")
             return
 
