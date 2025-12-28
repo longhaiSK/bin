@@ -46,8 +46,11 @@ import matplotlib.pyplot as plt
 # --- FIX: Disable Output Buffering ---
 sys.stdout.reconfigure(line_buffering=True)
 
-# --- FIX: Set PATH for launchd (Crucial for finding git/ssh in background) ---
-os.environ['PATH'] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" + os.pathsep + os.environ.get('PATH', '')
+# --- FIX: Set PATH for launchd (Crucial for finding git/ssh/git-lfs in background) ---
+# We explicitly add ~/.homebrew/bin for custom brew installs, plus standard paths
+custom_brew = os.path.expanduser("~/.homebrew/bin")
+std_paths = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+os.environ['PATH'] = f"{custom_brew}:{std_paths}" + os.pathsep + os.environ.get('PATH', '')
 
 # --- Configuration ---
 REPO_ROOTS = [Path(os.environ.get('githubroot', os.path.expanduser('~/Github')))]
