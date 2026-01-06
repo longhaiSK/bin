@@ -32,14 +32,17 @@ for FILE in "$@"; do
 
     echo "Processing $FILE..."
 
-    # 1. Remove [cite...] tags
+    echo "Remove [cite...] tags"
     regexrepl.py "$FILE" "\[cite(?:_start|:[^\]]+)\]" ""
 
-    # 2. Add blank line before lists
+    echo "Add blank lines before lists"
     regexrepl.py "$FILE" \
         '(?m)^(?!\s*(?:[-*]|\d+\.)\s)(.+)\n(?!\s*\n)(\s*(?:[-*]|\d+\.)\s)' \
         '\1\n\n\2'
 
-    # 3. Wrap math text
+    echo "Wrap math functions or acronyms with \text"
     wrap_math_text.py "$FILE"
+    
+    echo "Unify capitalization in headers"
+    san_qmd_titles.py "$FILE"
 done
